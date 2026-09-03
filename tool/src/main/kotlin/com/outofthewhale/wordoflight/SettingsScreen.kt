@@ -24,6 +24,7 @@ import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.lightClickable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -39,18 +40,81 @@ class SettingsViewModel(private val keyStore: ApiKeyStore) : LightViewModel<Unit
     private val _configured = MutableStateFlow<Set<ApiProvider>>(emptySet())
     val configured: StateFlow<Set<ApiProvider>> = _configured
 
+    /** What discovery found, or why it could not. */
+    private val _discovery = MutableStateFlow<String?>(null)
+    val discovery: StateFlow<String?> = _discovery
+
+    // Every state flow must be declared above this block. init runs in
+    // declaration order, and viewModelScope launches on Dispatchers.Main
+    // .immediate - so the coroutine body executes synchronously during
+    // construction, before any property declared below here exists.
     init {
         viewModelScope.launch {
             keyStore.configured.collect { _configured.value = it }
         }
+        viewModelScope.launch {
+            // A key saved before discovery existed has no bindings, and so
+            // unlocks nothing. Re-check on open rather than making the reader
+            // re-enter a key they have already given us.
+            val hasKey = keyStore.key(ApiProvider.API_BIBLE) != null
+            val bound = keyStore.bibleIds.first().keys.any { id ->
+                Translations.byId(id)?.provider == ApiProvider.API_BIBLE
+            }
+            if (hasKey && !bound) discover()
+        }
     }
 
     fun setKey(provider: ApiProvider, key: String) {
-        viewModelScope.launch { keyStore.setKey(provider, key) }
+        viewModelScope.launch {
+            keyStore.setKey(provider, key)
+            if (provider == ApiProvider.API_BIBLE && key.isNotBlank()) discover()
+        }
     }
 
     fun clear(provider: ApiProvider) {
-        viewModelScope.launch { keyStore.clear(provider) }
+        viewModelScope.launch {
+            keyStore.clear(provider)
+            if (provider == ApiProvider.API_BIBLE) _discovery.value = null
+        }
+    }
+
+    /**
+     * Ask API.Bible what this key can read, and bind those ids.
+     *
+     * Doubles as validation: a bad key fails here, at the moment it is entered,
+     * rather than silently later when a chapter will not load. The free tier
+     * grants three translations chosen per account, so the ids cannot be
+     * hardcoded.
+     */
+    private suspend fun discover() {
+        _discovery.value = "Checking what this key can read…"
+        val api = BibleApi(keyStore)
+        try {
+            api.bibles().fold(
+                onSuccess = { remote ->
+                    val wanted = Translations.all.filter { it.provider == ApiProvider.API_BIBLE }
+                    val bindings = wanted.mapNotNull { translation ->
+                        remote.firstOrNull {
+                            it.shortName.equals(translation.abbreviation, ignoreCase = true)
+                        }?.let { translation.id to it.id }
+                    }.toMap()
+
+                    keyStore.bindBibleIds(bindings)
+                    _discovery.value = if (bindings.isEmpty()) {
+                        "Key accepted, but it grants none of " +
+                            wanted.joinToString(", ") { it.abbreviation } +
+                            ". Check which translations your plan selected."
+                    } else {
+                        "Ready: " + bindings.keys
+                            .mapNotNull { Translations.byId(it)?.abbreviation }
+                            .joinToString(", ")
+                    }
+                },
+                onFailure = { _discovery.value = it.message ?: "Could not reach API.Bible" },
+            )
+        } finally {
+            api.close()
+        }
     }
 }
 
@@ -78,6 +142,7 @@ class SettingsScreen(
     @Composable
     override fun Content() {
         val configured by viewModel.configured.collectAsState()
+        val discovery by viewModel.discovery.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
         LightTheme(colors = themeColors) {
@@ -114,6 +179,15 @@ class SettingsScreen(
                             }
                         },
                         onClear = { viewModel.clear(provider) },
+                    )
+                }
+
+                discovery?.let { message ->
+                    LightText(
+                        text = message,
+                        variant = LightTextVariant.Detail,
+                        lighten = true,
+                        modifier = Modifier.padding(top = 16.dp),
                     )
                 }
 

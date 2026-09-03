@@ -43,11 +43,15 @@ import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.lightClickable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 class ReaderViewModel(
     private val store: ModuleStore,
     private val marksStore: MarksStore,
+    private val keyStore: ApiKeyStore,
+    private val cache: ChapterCache,
+    private val api: BibleApi,
 ) : LightViewModel<Unit>() {
 
     // Opening position until the resume-where-you-left-off store lands.
@@ -67,9 +71,33 @@ class ReaderViewModel(
     private val _selection = MutableStateFlow<Set<String>>(emptySet())
     val selection: StateFlow<Set<String>> = _selection
 
+    /** A message to show instead of the text: fetching, or why there is none. */
+    private val _status = MutableStateFlow<String?>(null)
+    val status: StateFlow<String?> = _status
+
+    /** Translations that can actually be read right now. */
+    private val _readable = MutableStateFlow(setOf(Translations.KJV.id))
+    val readable: StateFlow<Set<String>> = _readable
+
     init {
         viewModelScope.launch {
             marksStore.marks.collect { _marks.value = it }
+        }
+        viewModelScope.launch {
+            // An API translation is readable once its provider has a key *and*
+            // we know which remote Bible backs it.
+            combine(keyStore.configured, keyStore.bibleIds) { providers, bindings ->
+                Translations.all
+                    .filter { translation ->
+                        when {
+                            translation.source != Source.API -> true
+                            translation.provider !in providers -> false
+                            else -> bindings.containsKey(translation.id)
+                        }
+                    }
+                    .map { it.id }
+                    .toSet()
+            }.collect { _readable.value = it }
         }
     }
 
@@ -79,8 +107,53 @@ class ReaderViewModel(
     }
 
     private fun reload() {
-        val module = store.load(_translation.value.id, _ref.value.book)
-        _verses.value = module?.chapter(_ref.value.chapter).orEmpty()
+        val translation = _translation.value
+        val ref = _ref.value
+
+        if (translation.source != Source.API) {
+            _verses.value = store.load(translation.id, ref.book)?.chapter(ref.chapter).orEmpty()
+            _status.value = null
+            return
+        }
+
+        // Fetched once, then read from disk forever after - so a chapter you
+        // have already opened works with no signal and costs no quota.
+        cache.get(translation.id, ref)?.let { cached ->
+            _verses.value = cached
+            _status.value = null
+            return
+        }
+
+        _verses.value = emptyList()
+        _status.value = "Fetching ${ref.label()} in ${translation.abbreviation}…"
+        viewModelScope.launch { fetch(translation, ref) }
+    }
+
+    private suspend fun fetch(translation: Translation, ref: ChapterRef) {
+        val bibleId = keyStore.bibleId(translation.id)
+        if (bibleId == null) {
+            _status.value = "${translation.abbreviation} is not set up yet. " +
+                "Add a key in Settings."
+            return
+        }
+
+        when (val result = api.chapter(bibleId, ref.book, ref.chapter)) {
+            is Fetched.Ok -> {
+                cache.put(translation.id, ref, result.verses)
+                // The chapter may have changed underneath a slow request.
+                if (_ref.value == ref && _translation.value == translation) {
+                    _verses.value = result.verses
+                    _status.value = null
+                }
+            }
+            Fetched.NoKey -> _status.value =
+                "No ${translation.provider?.displayName} key saved."
+            Fetched.NotEntitled -> _status.value =
+                "This key cannot read ${translation.abbreviation}."
+            Fetched.QuotaExceeded -> _status.value =
+                "Monthly request limit reached for ${translation.abbreviation}."
+            is Fetched.Failed -> _status.value = result.reason
+        }
     }
 
     fun goTo(ref: ChapterRef) {
@@ -97,8 +170,10 @@ class ReaderViewModel(
     fun testament(): Testament =
         Canon.book(_ref.value.book)?.testament ?: Testament.OLD
 
-    fun availableIds(): Set<String> =
-        store.availableFor(_ref.value.book).map { it.id }.toSet()
+    override fun onCleared() {
+        super.onCleared()
+        api.close()
+    }
 
     // --- selection ------------------------------------------------------
 
@@ -164,6 +239,9 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
     override fun createViewModel() = ReaderViewModel(
         ModuleStore(lightContext.filesDir, lightContext::readAsset),
         MarksStore(lightContext.dataStore),
+        keyStore,
+        ChapterCache(lightContext.filesDir),
+        BibleApi(keyStore),
     )
 
     @Composable
@@ -173,6 +251,7 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
         val verses by viewModel.verses.collectAsState()
         val marks by viewModel.marks.collectAsState()
         val selection by viewModel.selection.collectAsState()
+        val status by viewModel.status.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
         val scrollState = rememberScrollState()
@@ -212,7 +291,7 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
 
                 if (verses.isEmpty()) {
                     LightText(
-                        text = "${ref.label()} is not on this device in " +
+                        text = status ?: "${ref.label()} is not on this device in " +
                             "${translation.abbreviation}.",
                         variant = LightTextVariant.Copy,
                         lighten = true,
@@ -307,7 +386,7 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
     }
 
     private fun openVersions(current: Translation) {
-        val available = viewModel.availableIds()
+        val available = viewModel.readable.value
         navigateTo({ activity -> VersionSelectScreen(activity, current, available) }) { id ->
             Translations.byId(id)?.let { viewModel.switchTo(it) }
         }

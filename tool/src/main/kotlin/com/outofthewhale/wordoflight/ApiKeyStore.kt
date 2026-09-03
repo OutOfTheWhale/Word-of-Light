@@ -54,6 +54,42 @@ class ApiKeyStore(private val dataStore: DataStore<Preferences>) {
 
     suspend fun clear(provider: ApiProvider) = setKey(provider, "")
 
+    // --- which remote Bible backs which translation ---------------------
+    //
+    // Discovered by asking the API what this key can read, rather than
+    // hardcoded: a free-tier account is granted a particular three
+    // translations, and the ids differ between accounts and publications.
+
+    val bibleIds: Flow<Map<String, String>> = dataStore.data.map { preferences ->
+        preferences[BIBLE_IDS]?.let(::decodeBindings).orEmpty()
+    }
+
+    suspend fun bibleId(translationId: String): String? =
+        decodeBindings(dataStore.data.first()[BIBLE_IDS].orEmpty())[translationId]
+
+    suspend fun bindBibleIds(bindings: Map<String, String>) {
+        dataStore.edit { preferences ->
+            val merged = decodeBindings(preferences[BIBLE_IDS].orEmpty()) + bindings
+            preferences[BIBLE_IDS] = merged.entries.joinToString(";") { "${it.key}=${it.value}" }
+        }
+    }
+
+    private fun decodeBindings(raw: String): Map<String, String> =
+        raw.split(';')
+            .mapNotNull { entry ->
+                val parts = entry.split('=', limit = 2)
+                if (parts.size == 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) {
+                    parts[0] to parts[1]
+                } else {
+                    null
+                }
+            }
+            .toMap()
+
     private fun keyFor(provider: ApiProvider) =
         stringPreferencesKey("apikey.${provider.name.lowercase()}")
+
+    private companion object {
+        val BIBLE_IDS = stringPreferencesKey("apibible.bibleids")
+    }
 }

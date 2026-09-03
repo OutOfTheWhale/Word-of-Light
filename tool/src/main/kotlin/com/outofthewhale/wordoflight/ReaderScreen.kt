@@ -230,9 +230,6 @@ class ReaderViewModel(
         _selection.value = emptySet()
     }
 
-    val selectionLabel: String
-        get() = _selection.value.size.let { if (it == 1) "1 verse" else "$it verses" }
-
     /** The selection as references, in the order they appear in the chapter. */
     fun selectedVerses(): List<VerseRef> = _selection.value
         .mapNotNull(VerseRef::parse)
@@ -240,11 +237,14 @@ class ReaderViewModel(
 
     // --- marks ----------------------------------------------------------
 
+    // Underlining and marking leave the selection in place, so a passage can
+    // be underlined and then annotated without picking the same verses out
+    // twice. NOTE and CLEAR end the selection.
+
     fun highlightSelection() {
         val refs = _selection.value
         if (refs.isEmpty()) return
         edit { it.toggleHighlight(refs, System.currentTimeMillis()) }
-        clearSelection()
     }
 
     fun bookmarkSelection() {
@@ -252,17 +252,28 @@ class ReaderViewModel(
         if (refs.isEmpty()) return
         val now = System.currentTimeMillis()
         edit { marks -> refs.fold(marks) { acc, ref -> acc.toggleBookmark(ref, now) } }
-        clearSelection()
     }
 
-    /** The note hangs on the first verse of the selection. */
-    fun noteAnchor(): String? = _selection.value.minByOrNull { it }
+    /**
+     * The note already on the selection, for editing rather than replacing.
+     *
+     * Blank unless every selected verse carries the same one - otherwise
+     * opening the editor would silently pick one verse's note and then
+     * overwrite the rest with it.
+     */
+    fun existingNote(): String {
+        val refs = _selection.value
+        if (refs.isEmpty()) return ""
+        val marks = _marks.value
+        val first = marks.noteFor(refs.min())
+        return if (refs.all { marks.noteFor(it) == first }) first else ""
+    }
 
-    fun existingNote(): String = noteAnchor()?.let { _marks.value.noteFor(it) }.orEmpty()
-
+    /** One note, written onto every verse selected. */
     fun saveNote(text: String) {
-        val anchor = noteAnchor() ?: return
-        edit { it.withNote(anchor, text, System.currentTimeMillis()) }
+        val refs = _selection.value
+        if (refs.isEmpty()) return
+        edit { it.withNoteOn(refs, text, System.currentTimeMillis()) }
         clearSelection()
     }
 
@@ -357,7 +368,7 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
                         .weight(1f)
                         .padding(horizontal = 24.dp),
                 ) {
-                    if (selection.isNotEmpty()) SelectionActions()
+                    if (selection.isNotEmpty()) SelectionActions(selection.size)
 
                     if (verses.isEmpty()) {
                         LightText(
@@ -448,11 +459,19 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
         }
     }
 
+    /**
+     * [count] is a parameter rather than read off the view model inside.
+     *
+     * A composable taking no arguments is skippable: Compose will not re-run it
+     * just because the parent did, so a value read through a plain getter goes
+     * stale. The verse bars kept up because the parent reads the selection
+     * itself; this label sat at "1 VERSE" with two verses selected.
+     */
     @Composable
-    private fun SelectionActions() {
+    private fun SelectionActions(count: Int) {
         Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
             LightText(
-                text = viewModel.selectionLabel.uppercase(),
+                text = if (count == 1) "1 VERSE" else "$count VERSES",
                 variant = LightTextVariant.Fine,
                 lighten = true,
                 modifier = Modifier.padding(bottom = 6.dp),
@@ -514,12 +533,16 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
     }
 
     private fun openNote() {
-        val anchor = viewModel.noteAnchor() ?: return
-        val title = VerseRef.parse(anchor)?.label() ?: "Note"
-        val existing = viewModel.existingNote()
-        navigateTo({ activity -> NoteEditScreen(activity, title, existing) }) { text ->
-            viewModel.saveNote(text)
+        val verses = viewModel.selectedVerses()
+        if (verses.isEmpty()) return
+        val title = if (verses.size == 1) {
+            verses.first().label()
+        } else {
+            "${verses.first().label()}-${verses.last().verse}"
         }
+        navigateTo({ activity ->
+            NoteEditScreen(activity, title, viewModel.existingNote())
+        }) { text -> viewModel.saveNote(text) }
     }
 
     private fun studyWord(word: Word) {

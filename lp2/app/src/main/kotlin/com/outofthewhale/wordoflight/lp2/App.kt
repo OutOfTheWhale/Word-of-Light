@@ -59,7 +59,7 @@ internal sealed interface Route {
     data object Settings : Route
     data class Chapters(val book: Book) : Route
     data class Marks(val list: MarkList) : Route
-    data class Note(val anchor: String, val title: String, val initial: String) : Route
+    data class Note(val refs: Set<String>, val title: String, val initial: String) : Route
     data class Study(val word: Word, val testament: Testament) : Route
     data class Compare(val verses: List<VerseRef>) : Route
 }
@@ -161,6 +161,9 @@ fun WordOfLightApp(
                 onToggleSelect = { key ->
                     selection = if (key in selection) selection - key else selection + key
                 },
+                // Underlining and marking leave the selection in place, so a
+                // passage can be underlined and then annotated without picking
+                // the same verses out twice. NOTE and CLEAR end it.
                 onUnderline = {
                     val chosen = selection
                     if (chosen.isNotEmpty()) {
@@ -169,7 +172,6 @@ fun WordOfLightApp(
                                 it.toggleHighlight(chosen, System.currentTimeMillis())
                             }
                         }
-                        selection = emptySet()
                     }
                 },
                 onMark = {
@@ -181,16 +183,24 @@ fun WordOfLightApp(
                                 chosen.fold(existing) { acc, k -> acc.toggleBookmark(k, now) }
                             }
                         }
-                        selection = emptySet()
                     }
                 },
                 onNote = {
-                    val anchor = selection.minOrNull()
-                    if (anchor != null) {
+                    val chosen = selection.mapNotNull(VerseRef::parse).sortedBy { it.verse }
+                    if (chosen.isNotEmpty()) {
+                        // Blank unless every verse already carries the same
+                        // note, so opening the editor cannot silently pick one
+                        // and overwrite the rest with it.
+                        val first = marks.noteFor(selection.min())
+                        val shared = if (selection.all { marks.noteFor(it) == first }) first else ""
                         route = Route.Note(
-                            anchor = anchor,
-                            title = VerseRef.parse(anchor)?.label() ?: "Note",
-                            initial = marks.noteFor(anchor),
+                            refs = selection,
+                            title = if (chosen.size == 1) {
+                                chosen.first().label()
+                            } else {
+                                "${chosen.first().label()}-${chosen.last().verse}"
+                            },
+                            initial = shared,
                         )
                     }
                 },
@@ -277,7 +287,7 @@ fun WordOfLightApp(
                 onSave = { text ->
                     scope.launch {
                         marksStore.update {
-                            it.withNote(current.anchor, text, System.currentTimeMillis())
+                            it.withNoteOn(current.refs, text, System.currentTimeMillis())
                         }
                     }
                     selection = emptySet()

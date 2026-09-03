@@ -146,6 +146,71 @@ class MarksTest {
         assertEquals("", marks.withChapterNote(ref, "").chapterNote(ref))
     }
 
+    // --- a note across a selection ---------------------------------------
+
+    @Test
+    fun `one note lands on every verse of the selection`() {
+        val refs = listOf("gen.1.1", "gen.1.2", "gen.1.3")
+        val marks = Marks().withNoteOn(refs, "a thought")
+        refs.forEach { assertEquals("a thought", marks.noteFor(it), it) }
+    }
+
+    @Test
+    fun `a run sharing one note lists as a single entry`() {
+        // Otherwise one thought about a passage appears five times over.
+        val marks = Marks().withNoteOn(listOf("gen.1.1", "gen.1.2", "gen.1.3"), "a thought")
+        val entry = marks.noteEntries.single()
+        assertEquals("Genesis 1:1-3", entry.label)
+        assertEquals("a thought", entry.note)
+    }
+
+    @Test
+    fun `a single annotated verse keeps a plain label`() {
+        val marks = Marks().withNoteOn(listOf("gen.1.1"), "a thought")
+        assertEquals("Genesis 1:1", marks.noteEntries.single().label)
+    }
+
+    @Test
+    fun `a gap in the verses breaks the run`() {
+        val marks = Marks().withNoteOn(listOf("gen.1.1", "gen.1.2"), "a thought")
+            .withNoteOn(listOf("gen.1.5"), "a thought")
+        assertEquals(
+            listOf("Genesis 1:1-2", "Genesis 1:5"),
+            marks.noteEntries.map { it.label },
+        )
+    }
+
+    @Test
+    fun `different notes on adjacent verses stay separate`() {
+        val marks = Marks()
+            .withNoteOn(listOf("gen.1.1"), "first")
+            .withNoteOn(listOf("gen.1.2"), "second")
+        assertEquals(2, marks.noteEntries.size)
+    }
+
+    @Test
+    fun `a run does not span a chapter boundary`() {
+        val marks = Marks()
+            .withNoteOn(listOf("gen.1.31"), "a thought")
+            .withNoteOn(listOf("gen.2.1"), "a thought")
+        assertEquals(2, marks.noteEntries.size)
+    }
+
+    @Test
+    fun `noting a selection leaves its highlights alone`() {
+        val refs = listOf("gen.1.1", "gen.1.2")
+        val marks = Marks().withHighlight(refs, true).withNoteOn(refs, "a thought")
+        refs.forEach { assertTrue(marks.isHighlighted(it), it) }
+        assertEquals(2, marks.highlights.size)
+    }
+
+    @Test
+    fun `clearing the note off a run removes every copy`() {
+        val refs = listOf("gen.1.1", "gen.1.2", "gen.1.3")
+        val marks = Marks().withNoteOn(refs, "a thought").withNoteOn(refs, "")
+        assertTrue(marks.noteEntries.isEmpty())
+    }
+
     // --- chapter bookmarks ----------------------------------------------
 
     @Test

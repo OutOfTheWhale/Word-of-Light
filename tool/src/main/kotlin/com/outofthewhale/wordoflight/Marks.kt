@@ -58,6 +58,23 @@ data class Recent(
     fun chapterRef(): ChapterRef? = ChapterRef.parse(ref)
 }
 
+/**
+ * A note as it should be listed: one thought, however many verses carry it.
+ *
+ * Not stored - derived from the verse records, which each hold their own copy
+ * so that any verse in the passage shows the note marker.
+ */
+data class NoteEntry(
+    val first: VerseRef,
+    val lastVerse: Int,
+    val note: String,
+) {
+    val label: String
+        get() = if (lastVerse == first.verse) first.label() else "${first.label()}-$lastVerse"
+
+    fun chapterRef(): ChapterRef = first.chapterRef()
+}
+
 @Serializable
 data class Marks(
     val verses: Map<String, VerseMark> = emptyMap(),
@@ -82,6 +99,34 @@ data class Marks(
 
     val notes: List<VerseMark>
         get() = verses.values.filter { it.hasNote }.sortedBy { it.ref.canonicalOrder() }
+
+    /**
+     * Notes for display, with a run of verses sharing one note folded into a
+     * single entry - "Genesis 1:1-5" rather than the same sentence five times.
+     *
+     * Only an unbroken run in the same chapter with identical text is merged;
+     * two verses that happen to carry the same words separately stay separate,
+     * because they were written as separate notes.
+     */
+    val noteEntries: List<NoteEntry>
+        get() {
+            val entries = mutableListOf<NoteEntry>()
+            notes.forEach { mark ->
+                val ref = mark.verseRef() ?: return@forEach
+                val last = entries.lastOrNull()
+                val continues = last != null &&
+                    last.note == mark.note &&
+                    last.first.book == ref.book &&
+                    last.first.chapter == ref.chapter &&
+                    last.lastVerse + 1 == ref.verse
+                if (continues) {
+                    entries[entries.lastIndex] = last!!.copy(lastVerse = ref.verse)
+                } else {
+                    entries += NoteEntry(ref, ref.verse, mark.note)
+                }
+            }
+            return entries
+        }
 
     // --- transformations ------------------------------------------------
     // Pure, so they can be tested without a device.
@@ -114,6 +159,16 @@ data class Marks(
 
     fun withNote(ref: String, note: String, now: Long = 0L): Marks =
         change(ref, now) { it.copy(note = note.trim()) }
+
+    /**
+     * Puts one note on every verse of a selection.
+     *
+     * A thought about a passage belongs to the whole passage, so each verse
+     * carries it and each shows the note marker. [noteEntries] folds a run
+     * back into a single line so the Notes list does not repeat it.
+     */
+    fun withNoteOn(refs: Collection<String>, note: String, now: Long = 0L): Marks =
+        refs.fold(this) { marks, ref -> marks.withNote(ref, note, now) }
 
     fun withChapterNote(ref: ChapterRef, note: String): Marks {
         val next = chapterNotes.toMutableMap()

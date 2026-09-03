@@ -124,11 +124,11 @@ private fun entriesFor(list: MarkList, marks: Marks): List<Entry> = when (list) 
                 mark.verseRef()?.let { Entry(it.chapterRef(), it.label(), null) }
             }
 
+    // noteEntries, not notes: one thought written across a passage is one line
+    // here, not the same sentence once per verse.
     MarkList.NOTES ->
         marks.annotatedChapters.map { Entry(it, it.label(), marks.chapterNote(it)) } +
-            marks.notes.mapNotNull { mark ->
-                mark.verseRef()?.let { Entry(it.chapterRef(), it.label(), mark.note) }
-            }
+            marks.noteEntries.map { Entry(it.chapterRef(), it.label, it.note) }
 
     MarkList.HIGHLIGHTS -> marks.highlights.mapNotNull { mark ->
         mark.verseRef()?.let { Entry(it.chapterRef(), it.label(), null) }

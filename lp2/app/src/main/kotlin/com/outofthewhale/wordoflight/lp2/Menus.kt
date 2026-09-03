@@ -58,7 +58,9 @@ internal fun MenuList(
             "Bookmarks",
             count(marks.chapterBookmarks.size + marks.bookmarks.size, "saved"),
         ) { onList(MarkList.BOOKMARKS) }
-        Item("Notes", count(marks.chapterNotes.size + marks.notes.size, "note")) {
+        // noteEntries, not notes: the count has to agree with the list, and a
+        // note written across a passage is one note there.
+        Item("Notes", count(marks.chapterNotes.size + marks.noteEntries.size, "note")) {
             onList(MarkList.NOTES)
         }
         Item("Highlights", count(marks.highlights.size, "verse")) {

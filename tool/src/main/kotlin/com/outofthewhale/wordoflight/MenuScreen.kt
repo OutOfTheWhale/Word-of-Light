@@ -64,7 +64,9 @@ class MenuScreen(
                     "Bookmarks",
                     count(marks.chapterBookmarks.size + marks.bookmarks.size, "saved"),
                 ) { openList(MarkList.BOOKMARKS) }
-                Item("Notes", count(marks.chapterNotes.size + marks.notes.size, "note")) {
+                // noteEntries, not notes: the count has to agree with the list,
+                // and a note written across a passage is one note there.
+                Item("Notes", count(marks.chapterNotes.size + marks.noteEntries.size, "note")) {
                     openList(MarkList.NOTES)
                 }
                 Item("Highlights", count(marks.highlights.size, "verse")) {

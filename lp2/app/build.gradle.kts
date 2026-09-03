@@ -56,6 +56,11 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            // Signed with the debug key so the release build is installable by
+            // sideloading. This is not a distribution key - anyone can produce
+            // an "update" signed the same way. Generate a private keystore,
+            // kept out of the repository, before giving this to anyone else.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

@@ -52,6 +52,7 @@ class ReaderViewModel(
     private val keyStore: ApiKeyStore,
     private val cache: ChapterCache,
     private val api: BibleApi,
+    private val nlt: NltApi,
 ) : LightViewModel<Unit>() {
 
     // Opening position until the resume-where-you-left-off store lands.
@@ -79,6 +80,10 @@ class ReaderViewModel(
     private val _readable = MutableStateFlow(setOf(Translations.KJV.id))
     val readable: StateFlow<Set<String>> = _readable
 
+    /** Why each translation cannot be read, keyed by id; null means it can. */
+    private val _blocked = MutableStateFlow<Map<String, String?>>(emptyMap())
+    val blocked: StateFlow<Map<String, String?>> = _blocked
+
     init {
         viewModelScope.launch {
             marksStore.marks.collect { _marks.value = it }
@@ -87,17 +92,11 @@ class ReaderViewModel(
             // An API translation is readable once its provider has a key *and*
             // we know which remote Bible backs it.
             combine(keyStore.configured, keyStore.bibleIds) { providers, bindings ->
-                Translations.all
-                    .filter { translation ->
-                        when {
-                            translation.source != Source.API -> true
-                            translation.provider !in providers -> false
-                            else -> bindings.containsKey(translation.id)
-                        }
-                    }
-                    .map { it.id }
-                    .toSet()
-            }.collect { _readable.value = it }
+                Translations.all.associate { it.id to it.blockedReason(providers, bindings.keys) }
+            }.collect { reasons ->
+                _blocked.value = reasons
+                _readable.value = reasons.filterValues { it == null }.keys
+            }
         }
     }
 
@@ -130,14 +129,26 @@ class ReaderViewModel(
     }
 
     private suspend fun fetch(translation: Translation, ref: ChapterRef) {
-        val bibleId = keyStore.bibleId(translation.id)
-        if (bibleId == null) {
-            _status.value = "${translation.abbreviation} is not set up yet. " +
-                "Add a key in Settings."
-            return
+        val result = when (translation.provider) {
+            ApiProvider.API_BIBLE -> {
+                val bibleId = keyStore.bibleId(translation.id)
+                if (bibleId == null) {
+                    _status.value = "${translation.abbreviation} is not set up yet. " +
+                        "Open Settings to finish."
+                    return
+                }
+                api.chapter(bibleId, ref.book, ref.chapter)
+            }
+
+            ApiProvider.NLT_API -> nlt.chapter(ref.book, ref.chapter)
+
+            else -> {
+                _status.value = "${translation.abbreviation} is not supported yet."
+                return
+            }
         }
 
-        when (val result = api.chapter(bibleId, ref.book, ref.chapter)) {
+        when (result) {
             is Fetched.Ok -> {
                 cache.put(translation.id, ref, result.verses)
                 // The chapter may have changed underneath a slow request.
@@ -173,6 +184,7 @@ class ReaderViewModel(
     override fun onCleared() {
         super.onCleared()
         api.close()
+        nlt.close()
     }
 
     // --- selection ------------------------------------------------------
@@ -242,6 +254,7 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
         keyStore,
         ChapterCache(lightContext.filesDir),
         BibleApi(keyStore),
+        NltApi(keyStore),
     )
 
     @Composable
@@ -386,8 +399,8 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
     }
 
     private fun openVersions(current: Translation) {
-        val available = viewModel.readable.value
-        navigateTo({ activity -> VersionSelectScreen(activity, current, available) }) { id ->
+        val reasons = viewModel.blocked.value
+        navigateTo({ activity -> VersionSelectScreen(activity, current, reasons) }) { id ->
             Translations.byId(id)?.let { viewModel.switchTo(it) }
         }
     }

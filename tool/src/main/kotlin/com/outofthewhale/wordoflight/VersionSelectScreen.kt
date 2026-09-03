@@ -30,7 +30,8 @@ import com.thelightphone.sdk.ui.lightClickable
 class VersionSelectScreen(
     sealedActivity: SealedLightActivity,
     private val current: Translation,
-    private val available: Set<String>,
+    /** Why each translation cannot be read, by id; null means it can. */
+    private val reasons: Map<String, String?>,
 ) : SimpleLightScreen<String>(sealedActivity) {
 
     @Composable
@@ -65,7 +66,8 @@ class VersionSelectScreen(
 
     @Composable
     private fun Row(translation: Translation) {
-        val ready = translation.id in available
+        val reason = reasons[translation.id]
+        val ready = reason == null
         val selected = translation.id == current.id
 
         Column(
@@ -83,14 +85,10 @@ class VersionSelectScreen(
                 lighten = !ready,
             )
             LightText(
-                text = if (ready) translation.name else "${translation.name} — $STATUS_NEEDS_KEY",
+                text = if (ready) translation.name else "${translation.name} — $reason",
                 variant = LightTextVariant.Fine,
                 lighten = true,
             )
         }
-    }
-
-    private companion object {
-        const val STATUS_NEEDS_KEY = "add an API key in Settings"
     }
 }

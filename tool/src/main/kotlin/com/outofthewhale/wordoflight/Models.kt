@@ -108,10 +108,21 @@ enum class Source {
  * exactly three copyrighted translations - hence CSB, NKJV and AMP and no
  * more without paying.
  */
-enum class ApiProvider(val displayName: String, val keyUrl: String) {
-    ESV_API("Crossway", "https://api.esv.org"),
-    NLT_API("Tyndale", "https://api.nlt.to"),
-    API_BIBLE("API.Bible", "https://scripture.api.bible"),
+enum class ApiProvider(
+    val displayName: String,
+    val keyUrl: String,
+    /** False while no client for this provider has been written yet. */
+    val supported: Boolean,
+    /**
+     * Whether a remote id has to be discovered before anything can be read.
+     * API.Bible identifies each translation by an opaque id that differs per
+     * account; Tyndale and Crossway address theirs by name.
+     */
+    val needsBinding: Boolean,
+) {
+    ESV_API("Crossway", "https://api.esv.org", supported = false, needsBinding = false),
+    NLT_API("Tyndale", "https://api.nlt.to", supported = true, needsBinding = false),
+    API_BIBLE("API.Bible", "https://docs.api.bible", supported = true, needsBinding = true),
 }
 
 data class Translation(
@@ -126,6 +137,20 @@ data class Translation(
     /** True once the key this translation needs has been entered. */
     fun isReady(keys: Set<ApiProvider>): Boolean =
         provider == null || provider in keys
+
+    /**
+     * Why this translation cannot be read, or null when it can.
+     *
+     * Saying "add an API key" to someone who has already added one is worse
+     * than saying nothing, so an unbuilt client says so plainly.
+     */
+    fun blockedReason(keys: Set<ApiProvider>, bindings: Set<String>): String? = when {
+        provider == null -> null
+        !provider.supported -> "not supported yet"
+        provider !in keys -> "add a ${provider.displayName} key in Settings"
+        provider.needsBinding && id !in bindings -> "open Settings to finish setup"
+        else -> null
+    }
 }
 
 object Translations {

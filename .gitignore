@@ -53,3 +53,9 @@ __pycache__/
 ### Python ###
 __pycache__/
 *.pyc
+
+### LP2 build ###
+lp2/.gradle
+lp2/build/
+lp2/app/build/
+lp2/local.properties

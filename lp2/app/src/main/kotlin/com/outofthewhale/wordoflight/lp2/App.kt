@@ -1,5 +1,6 @@
 package com.outofthewhale.wordoflight.lp2
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
@@ -24,6 +26,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.outofthewhale.wordoflight.ApiKeyStore
@@ -290,18 +294,9 @@ private fun Reader(
                 style = type.subheading.copy(color = palette.content),
                 modifier = Modifier.weight(1f).clickable(onClick = onOpenBooks),
             )
-            // Bright means flagged. Same "*" a bookmarked verse carries, one
-            // mark at two scales.
-            BasicText(
-                text = "*",
-                style = type.subheading.copy(
-                    color = if (marks.isChapterBookmarked(ref)) {
-                        palette.content
-                    } else {
-                        palette.contentSecondary
-                    }
-                ),
-                modifier = Modifier.clickable(onClick = onToggleFlag).padding(horizontal = 10.dp),
+            BookmarkFlag(
+                flagged = marks.isChapterBookmarked(ref),
+                onClick = onToggleFlag,
             )
             BasicText(
                 text = translation.abbreviation,
@@ -420,6 +415,47 @@ private fun VerseRow(
     }
 }
 
+/**
+ * The chapter flag: a ribbon, filled when set and outlined when not.
+ *
+ * Drawn rather than lettered so the states differ in fill rather than in
+ * shade - on a black-and-white screen a dim glyph beside a bright one reads as
+ * low contrast, not as "off". It takes the theme's content colour, so it
+ * inverts with light mode without a second asset.
+ *
+ * The shape is small; the touch target around it is not.
+ */
+@Composable
+private fun BookmarkFlag(flagged: Boolean, onClick: () -> Unit) {
+    val palette = LocalPalette.current
+    Box(
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+    ) {
+        Canvas(modifier = Modifier.size(width = 15.dp, height = 21.dp)) {
+            val notch = size.height * NOTCH_FRACTION
+            val ribbon = Path().apply {
+                moveTo(0f, 0f)
+                lineTo(size.width, 0f)
+                lineTo(size.width, size.height)
+                lineTo(size.width / 2f, size.height - notch)
+                lineTo(0f, size.height)
+                close()
+            }
+            if (flagged) {
+                drawPath(ribbon, palette.content)
+            } else {
+                drawPath(ribbon, palette.contentSecondary, style = Stroke(width = OUTLINE_WIDTH))
+            }
+        }
+    }
+}
+
 /** Within a book the number is enough; the header names the book. */
 internal fun step(target: ChapterRef, current: ChapterRef): String =
     if (target.book == current.book) target.chapter.toString() else target.label()
+
+/** How far up the ribbon the notch is cut, as a share of its height. */
+private const val NOTCH_FRACTION = 0.3f
+private const val OUTLINE_WIDTH = 3f

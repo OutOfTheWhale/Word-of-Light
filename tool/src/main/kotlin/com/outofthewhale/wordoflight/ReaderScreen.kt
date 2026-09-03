@@ -1,5 +1,6 @@
 package com.outofthewhale.wordoflight
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
@@ -23,6 +25,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
@@ -333,16 +337,9 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
                             .weight(1f)
                             .lightClickable { openBooks() },
                     )
-                    // The chapter flag. Bright means flagged, dim means not,
-                    // matching the "*" already used on a bookmarked verse -
-                    // one mark, two scales.
-                    LightText(
-                        text = "*",
-                        variant = LightTextVariant.Subheading,
-                        lighten = !marks.isChapterBookmarked(ref),
-                        modifier = Modifier
-                            .lightClickable { viewModel.toggleChapterBookmark() }
-                            .padding(horizontal = 10.dp),
+                    BookmarkFlag(
+                        flagged = marks.isChapterBookmarked(ref),
+                        onClick = { viewModel.toggleChapterBookmark() },
                     )
                     LightText(
                         text = translation.abbreviation,
@@ -406,6 +403,47 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
                     }
                 }
 
+            }
+        }
+    }
+
+    /**
+     * The chapter flag: a ribbon, filled when set and outlined when not.
+     *
+     * Drawn rather than lettered so the two states differ in fill rather than
+     * in shade - the screen is greyscale, and a dim glyph beside a bright one
+     * reads as low contrast rather than as off. It takes its colour from the
+     * theme's content tone, so it inverts with light mode for free.
+     *
+     * The shape is small; the touch target around it is not.
+     */
+    @Composable
+    private fun BookmarkFlag(flagged: Boolean, onClick: () -> Unit) {
+        val colors = LightThemeTokens.colors
+        Box(
+            modifier = Modifier
+                .lightClickable(onClick = onClick)
+                .padding(horizontal = 10.dp, vertical = 4.dp)
+        ) {
+            Canvas(modifier = Modifier.size(width = 15.dp, height = 21.dp)) {
+                val notch = size.height * NOTCH_FRACTION
+                val ribbon = Path().apply {
+                    moveTo(0f, 0f)
+                    lineTo(size.width, 0f)
+                    lineTo(size.width, size.height)
+                    lineTo(size.width / 2f, size.height - notch)
+                    lineTo(0f, size.height)
+                    close()
+                }
+                if (flagged) {
+                    drawPath(ribbon, colors.content)
+                } else {
+                    drawPath(
+                        ribbon,
+                        colors.contentSecondary,
+                        style = Stroke(width = OUTLINE_WIDTH),
+                    )
+                }
             }
         }
     }
@@ -603,6 +641,10 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
     }
 
     private companion object {
+
+        /** How far up the ribbon the notch is cut, as a share of its height. */
+        const val NOTCH_FRACTION = 0.3f
+        const val OUTLINE_WIDTH = 3f
 
 
         /**

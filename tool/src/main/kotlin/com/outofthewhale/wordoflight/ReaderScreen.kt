@@ -27,6 +27,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.sdk.InitialScreen
@@ -47,12 +48,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 class ReaderViewModel(
-    private val store: ModuleStore,
+    val repository: ChapterRepository,
     private val marksStore: MarksStore,
     private val keyStore: ApiKeyStore,
-    private val cache: ChapterCache,
-    private val api: BibleApi,
-    private val nlt: NltApi,
 ) : LightViewModel<Unit>() {
 
     // Opening position until the resume-where-you-left-off store lands.
@@ -109,49 +107,28 @@ class ReaderViewModel(
         val translation = _translation.value
         val ref = _ref.value
 
-        if (translation.source != Source.API) {
-            _verses.value = store.load(translation.id, ref.book)?.chapter(ref.chapter).orEmpty()
-            _status.value = null
-            return
-        }
-
-        // Fetched once, then read from disk forever after - so a chapter you
-        // have already opened works with no signal and costs no quota.
-        cache.get(translation.id, ref)?.let { cached ->
-            _verses.value = cached
+        // Already on the device: bundled, sideloaded, or fetched once before.
+        repository.local(translation, ref)?.let { verses ->
+            _verses.value = verses
             _status.value = null
             return
         }
 
         _verses.value = emptyList()
+        if (translation.source != Source.API) {
+            _status.value = "${ref.label()} is not on this device in " +
+                translation.abbreviation
+            return
+        }
+
         _status.value = "Fetching ${ref.label()} in ${translation.abbreviation}…"
         viewModelScope.launch { fetch(translation, ref) }
     }
 
     private suspend fun fetch(translation: Translation, ref: ChapterRef) {
-        val result = when (translation.provider) {
-            ApiProvider.API_BIBLE -> {
-                val bibleId = keyStore.bibleId(translation.id)
-                if (bibleId == null) {
-                    _status.value = "${translation.abbreviation} is not set up yet. " +
-                        "Open Settings to finish."
-                    return
-                }
-                api.chapter(bibleId, ref.book, ref.chapter)
-            }
-
-            ApiProvider.NLT_API -> nlt.chapter(ref.book, ref.chapter)
-
-            else -> {
-                _status.value = "${translation.abbreviation} is not supported yet."
-                return
-            }
-        }
-
-        when (result) {
+        when (val result = repository.chapter(translation, ref)) {
             is Fetched.Ok -> {
-                cache.put(translation.id, ref, result.verses)
-                // The chapter may have changed underneath a slow request.
+                // The reader may have moved on underneath a slow request.
                 if (_ref.value == ref && _translation.value == translation) {
                     _verses.value = result.verses
                     _status.value = null
@@ -183,8 +160,7 @@ class ReaderViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        api.close()
-        nlt.close()
+        repository.close()
     }
 
     // --- selection ------------------------------------------------------
@@ -203,6 +179,11 @@ class ReaderViewModel(
 
     val selectionLabel: String
         get() = _selection.value.size.let { if (it == 1) "1 verse" else "$it verses" }
+
+    /** The selection as references, in the order they appear in the chapter. */
+    fun selectedVerses(): List<VerseRef> = _selection.value
+        .mapNotNull(VerseRef::parse)
+        .sortedBy { it.verse }
 
     // --- marks ----------------------------------------------------------
 
@@ -249,12 +230,15 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
         get() = ReaderViewModel::class.java
 
     override fun createViewModel() = ReaderViewModel(
-        ModuleStore(lightContext.filesDir, lightContext::readAsset),
+        ChapterRepository(
+            store = ModuleStore(lightContext.filesDir, lightContext::readAsset),
+            cache = ChapterCache(lightContext.filesDir),
+            keyStore = keyStore,
+            bibleApi = BibleApi(keyStore),
+            nltApi = NltApi(keyStore),
+        ),
         MarksStore(lightContext.dataStore),
         keyStore,
-        ChapterCache(lightContext.filesDir),
-        BibleApi(keyStore),
-        NltApi(keyStore),
     )
 
     @Composable
@@ -372,9 +356,15 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
                 lighten = true,
                 modifier = Modifier.padding(bottom = 6.dp),
             )
+            // Two rows: five labels on one line truncate on this screen rather
+            // than wrapping, and a half-visible action reads as a rendering
+            // fault.
             Row(modifier = Modifier.fillMaxWidth()) {
-                Action("HIGHLIGHT") { viewModel.highlightSelection() }
+                Action("UNDERLINE") { viewModel.highlightSelection() }
+                Action("COMPARE") { openCompare() }
                 Action("NOTE") { openNote() }
+            }
+            Row(modifier = Modifier.fillMaxWidth()) {
                 Action("MARK") { viewModel.bookmarkSelection() }
                 Action("CLEAR") { viewModel.clearSelection() }
             }
@@ -413,6 +403,15 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
         navigateTo({ activity -> MarksScreen(activity, viewModel.marks) }) { destination ->
             viewModel.goTo(destination)
         }
+    }
+
+    private fun openCompare() {
+        val verses = viewModel.selectedVerses()
+        if (verses.isEmpty()) return
+        val readable = viewModel.readable.value
+        navigateTo({ activity ->
+            CompareScreen(activity, viewModel.repository, verses, readable)
+        })
     }
 
     private fun openNote() {
@@ -457,20 +456,22 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
                 .height(IntrinsicSize.Min)
                 .padding(bottom = 12.dp)
         ) {
-            // Monochrome screen, so state is carried by a bar in the margin: a
-            // bright one for a highlight, a dim one for a pending selection.
-            val barColor = when {
-                highlighted -> LightThemeTokens.colors.content
-                selected -> LightThemeTokens.colors.contentSecondary
-                else -> null
-            }
+            // A highlight underlines the words themselves; the margin bar is
+            // left to mean "selected, not yet acted on". The screen is
+            // greyscale, so the two states have to differ in kind rather than
+            // in shade - four tones of grey would be four ways of looking the
+            // same.
             Box(
                 modifier = Modifier
                     .width(3.dp)
                     .fillMaxHeight()
                     .padding(end = 1.dp)
                     .then(
-                        if (barColor != null) Modifier.background(barColor) else Modifier
+                        if (selected) {
+                            Modifier.background(LightThemeTokens.colors.contentSecondary)
+                        } else {
+                            Modifier
+                        }
                     )
             )
 
@@ -488,12 +489,17 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
                     .width(34.dp)
                     .padding(start = 6.dp),
             )
-            VerseText(verse, Modifier.weight(1f), onTap)
+            VerseText(verse, highlighted, Modifier.weight(1f), onTap)
         }
     }
 
     @Composable
-    private fun VerseText(verse: Verse, modifier: Modifier, onTap: () -> Unit) {
+    private fun VerseText(
+        verse: Verse,
+        highlighted: Boolean,
+        modifier: Modifier,
+        onTap: () -> Unit,
+    ) {
         val rendered = remember(verse) { render(verse) }
 
         if (rendered.words.isEmpty()) {
@@ -501,6 +507,7 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
             LightText(
                 text = verse.render(),
                 variant = LightTextVariant.Paragraph,
+                underline = highlighted,
                 modifier = modifier.lightClickable(onClick = onTap),
             )
             return
@@ -508,7 +515,10 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
 
         var layout by remember(verse) { mutableStateOf<TextLayoutResult?>(null) }
         val style = LightThemeTokens.typography.paragraph
-            .copy(color = LightThemeTokens.colors.content)
+            .copy(
+                color = LightThemeTokens.colors.content,
+                textDecoration = if (highlighted) TextDecoration.Underline else null,
+            )
 
         // One text block rather than a word-per-box layout: the verse still
         // wraps as prose, and the tapped word is found by hit-testing the

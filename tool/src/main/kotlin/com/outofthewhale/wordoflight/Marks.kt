@@ -1,0 +1,151 @@
+package com.outofthewhale.wordoflight
+
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+
+/**
+ * What the reader has done to one verse.
+ *
+ * Highlight, bookmark and note live on a single record rather than three
+ * parallel lists, because they are not mutually exclusive - a verse can easily
+ * be highlighted and annotated - and keeping them together means there is only
+ * ever one place a given verse appears.
+ */
+@Serializable
+data class VerseMark(
+    val ref: String,
+    val highlighted: Boolean = false,
+    val bookmarked: Boolean = false,
+    val note: String = "",
+    val updatedAt: Long = 0L,
+) {
+    /** Nothing left to remember; the record should be dropped rather than stored blank. */
+    val isEmpty: Boolean
+        get() = !highlighted && !bookmarked && note.isBlank()
+
+    val hasNote: Boolean get() = note.isNotBlank()
+
+    fun verseRef(): VerseRef? = VerseRef.parse(ref)
+}
+
+/**
+ * Everything the reader has saved.
+ *
+ * Small enough to hold as one document - a lifetime of highlights is thousands
+ * of records, not millions - so it is stored as a single JSON value rather than
+ * a database, and every change is a pure transformation of this object.
+ */
+@Serializable
+data class Marks(
+    val verses: Map<String, VerseMark> = emptyMap(),
+    val chapterNotes: Map<String, String> = emptyMap(),
+) {
+    fun forVerse(ref: String): VerseMark? = verses[ref]
+
+    fun isHighlighted(ref: String): Boolean = verses[ref]?.highlighted == true
+
+    fun noteFor(ref: String): String = verses[ref]?.note.orEmpty()
+
+    fun chapterNote(ref: ChapterRef): String = chapterNotes[ref.key()].orEmpty()
+
+    val highlights: List<VerseMark>
+        get() = verses.values.filter { it.highlighted }.sortedBy { it.ref.canonicalOrder() }
+
+    val bookmarks: List<VerseMark>
+        get() = verses.values.filter { it.bookmarked }.sortedBy { it.ref.canonicalOrder() }
+
+    val notes: List<VerseMark>
+        get() = verses.values.filter { it.hasNote }.sortedBy { it.ref.canonicalOrder() }
+
+    // --- transformations ------------------------------------------------
+    // Pure, so they can be tested without a device.
+
+    private fun change(ref: String, now: Long, edit: (VerseMark) -> VerseMark): Marks {
+        val existing = verses[ref] ?: VerseMark(ref)
+        val updated = edit(existing).copy(updatedAt = now)
+        val next = verses.toMutableMap()
+        if (updated.isEmpty) next.remove(ref) else next[ref] = updated
+        return copy(verses = next)
+    }
+
+    fun withHighlight(refs: Collection<String>, on: Boolean, now: Long = 0L): Marks =
+        refs.fold(this) { marks, ref ->
+            marks.change(ref, now) { it.copy(highlighted = on) }
+        }
+
+    /** Highlights the whole selection unless all of it already is, then clears it. */
+    fun toggleHighlight(refs: Collection<String>, now: Long = 0L): Marks {
+        if (refs.isEmpty()) return this
+        val allOn = refs.all { isHighlighted(it) }
+        return withHighlight(refs, !allOn, now)
+    }
+
+    fun withBookmark(ref: String, on: Boolean, now: Long = 0L): Marks =
+        change(ref, now) { it.copy(bookmarked = on) }
+
+    fun toggleBookmark(ref: String, now: Long = 0L): Marks =
+        withBookmark(ref, verses[ref]?.bookmarked != true, now)
+
+    fun withNote(ref: String, note: String, now: Long = 0L): Marks =
+        change(ref, now) { it.copy(note = note.trim()) }
+
+    fun withChapterNote(ref: ChapterRef, note: String): Marks {
+        val next = chapterNotes.toMutableMap()
+        if (note.isBlank()) next.remove(ref.key()) else next[ref.key()] = note.trim()
+        return copy(chapterNotes = next)
+    }
+
+    /** Removes every mark on a verse in one go. */
+    fun clear(ref: String): Marks = copy(verses = verses - ref)
+}
+
+/** Sorts "gen.1.1" into canonical order rather than alphabetical. */
+private fun String.canonicalOrder(): Long {
+    val parsed = VerseRef.parse(this) ?: return Long.MAX_VALUE
+    val book = Canon.books.indexOfFirst { it.id == parsed.book }
+    if (book < 0) return Long.MAX_VALUE
+    return book * 1_000_000L + parsed.chapter * 1_000L + parsed.verse
+}
+
+fun ChapterRef.key(): String = "$book.$chapter"
+
+fun VerseRef.key(): String = "$book.$chapter.$verse"
+
+/**
+ * Persists [Marks] in the tool's own DataStore.
+ *
+ * A corrupt or absent value reads back as empty rather than throwing - losing
+ * highlights is bad, but refusing to open the Bible at all is worse.
+ */
+class MarksStore(private val dataStore: DataStore<Preferences>) {
+
+    private val json = Json { ignoreUnknownKeys = true }
+
+    val marks: Flow<Marks> = dataStore.data.map { preferences -> decode(preferences[KEY]) }
+
+    suspend fun update(transform: (Marks) -> Marks) {
+        dataStore.edit { preferences ->
+            val current = decode(preferences[KEY])
+            preferences[KEY] = json.encodeToString(Marks.serializer(), transform(current))
+        }
+    }
+
+    private fun decode(raw: String?): Marks {
+        if (raw.isNullOrBlank()) return Marks()
+        return try {
+            json.decodeFromString(Marks.serializer(), raw)
+        } catch (e: Exception) {
+            Marks()
+        }
+    }
+
+    private companion object {
+        val KEY = stringPreferencesKey("marks")
+    }
+}

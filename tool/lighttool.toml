@@ -1,10 +1,12 @@
 [tool]
-id = "com.thelightphone.app"
-label = "Light SDK Tool"
+id = "com.outofthewhale.wordoflight"
+label = "Word of Light"
 versionCode = 1
-versionName = "1.0.0"
+versionName = "0.1.0"
+# INTERNET is here for the API-backed translations (ESV, NLT, CSB). The
+# bundled KJV needs no network at all.
 permissions = ["android.permission.INTERNET"]
 capabilities = []
-# change if you run this on an LP3!
-# serverPackage = "com.lightos"
+# Targeting real Light Phone III hardware. Switch back to
+# "com.thelightphone.sdk.emulator" to run in the LightOS emulator.
 serverPackage = "com.thelightphone.sdk.emulator"

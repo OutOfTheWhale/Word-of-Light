@@ -21,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.AnnotatedString
@@ -252,23 +253,51 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
         val themeColors by LightThemeController.colors.collectAsState()
 
         val scrollState = rememberScrollState()
+        var footerVisible by remember { mutableStateOf(true) }
 
         // Turning the page should land at the top of the new chapter, not
         // halfway down it because that is where the last one was left.
-        LaunchedEffect(ref) { scrollState.scrollTo(0) }
+        LaunchedEffect(ref) {
+            scrollState.scrollTo(0)
+            footerVisible = true
+        }
+
+        // The footer gets out of the way while reading forward and comes back
+        // on the way up. It also stays put at either end, where there is no
+        // reading direction to infer and hiding it would just look broken.
+        LaunchedEffect(scrollState) {
+            var anchor = scrollState.value
+            snapshotFlow { scrollState.value }.collect { position ->
+                when {
+                    position <= 0 || position >= scrollState.maxValue -> {
+                        footerVisible = true
+                        anchor = position
+                    }
+                    position - anchor > SCROLL_THRESHOLD -> {
+                        footerVisible = false
+                        anchor = position
+                    }
+                    anchor - position > SCROLL_THRESHOLD -> {
+                        footerVisible = true
+                        anchor = position
+                    }
+                }
+            }
+        }
 
         LightTheme(colors = themeColors) {
-            // LightScrollView, never a bare Column: on the 1080x1240 screen a
-            // plain Column silently clips whatever sits at the bottom, which
-            // here would be the only way to turn the page.
-            LightScrollView(
-                scrollState = scrollState,
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(LightThemeTokens.colors.background)
-                    .padding(horizontal = 24.dp, vertical = 32.dp)
             ) {
-                Row(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                // Pinned. Changing book, chapter or version should never mean
+                // scrolling somewhere first to find the control.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 24.dp, end = 24.dp, top = 28.dp, bottom = 12.dp)
+                ) {
                     LightText(
                         text = ref.label(),
                         variant = LightTextVariant.Heading,
@@ -284,62 +313,81 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
                     )
                 }
 
-                if (selection.isNotEmpty()) SelectionActions()
+                // LightScrollView, never a bare Column: on the 1080x1240 screen
+                // a plain Column silently clips whatever sits at the bottom.
+                LightScrollView(
+                    scrollState = scrollState,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 24.dp),
+                ) {
+                    if (selection.isNotEmpty()) SelectionActions()
 
-                if (verses.isEmpty()) {
-                    LightText(
-                        text = status ?: "${ref.label()} is not on this device in " +
-                            "${translation.abbreviation}.",
-                        variant = LightTextVariant.Copy,
-                        lighten = true,
-                    )
-                } else {
-                    verses.forEach { verse ->
-                        val key = viewModel.keyOf(verse)
-                        VerseBlock(
-                            verse = verse,
-                            highlighted = marks.isHighlighted(key),
-                            selected = key in selection,
-                            hasNote = marks.forVerse(key)?.hasNote == true,
-                            bookmarked = marks.forVerse(key)?.bookmarked == true,
-                            onTap = { viewModel.toggleSelection(key) },
+                    if (verses.isEmpty()) {
+                        LightText(
+                            text = status ?: "${ref.label()} is not on this device in " +
+                                "${translation.abbreviation}.",
+                            variant = LightTextVariant.Copy,
+                            lighten = true,
                         )
+                    } else {
+                        verses.forEach { verse ->
+                            val key = viewModel.keyOf(verse)
+                            VerseBlock(
+                                verse = verse,
+                                highlighted = marks.isHighlighted(key),
+                                selected = key in selection,
+                                hasNote = marks.forVerse(key)?.hasNote == true,
+                                bookmarked = marks.forVerse(key)?.bookmarked == true,
+                                onTap = { viewModel.toggleSelection(key) },
+                            )
+                        }
+                    }
+
+                    // Naming the destination beats PREVIOUS/NEXT: at the end of
+                    // a book it is the only thing that says which book is next.
+                    val previous = Canon.previous(ref)
+                    val next = Canon.next(ref)
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 24.dp)) {
+                        if (previous != null) {
+                            LightText(
+                                text = previous.label(),
+                                variant = LightTextVariant.Button,
+                                modifier = Modifier.lightClickable { viewModel.goTo(previous) },
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {}
+                        if (next != null) {
+                            LightText(
+                                text = next.label(),
+                                variant = LightTextVariant.Button,
+                                modifier = Modifier.lightClickable { viewModel.goTo(next) },
+                            )
+                        }
                     }
                 }
 
-                Row(modifier = Modifier.fillMaxWidth().padding(top = 28.dp)) {
-                    LightText(
-                        text = "SAVED",
-                        variant = LightTextVariant.Button,
+                if (footerVisible) {
+                    // Generous top padding: text scrolling to the edge of the
+                    // region is cut mid-line, and without a gap the footer
+                    // reads as sitting on top of the words rather than below
+                    // them.
+                    Row(
                         modifier = Modifier
-                            .lightClickable { openMarks() }
-                            .padding(end = 24.dp),
-                    )
-                    LightText(
-                        text = "SETTINGS",
-                        variant = LightTextVariant.Button,
-                        modifier = Modifier.lightClickable { openSettings() },
-                    )
-                }
-
-                // Naming the destination beats PREVIOUS/NEXT: at the end of a
-                // book it is the only thing that tells you which book is next.
-                val previous = Canon.previous(ref)
-                val next = Canon.next(ref)
-                Row(modifier = Modifier.fillMaxWidth().padding(top = 20.dp)) {
-                    if (previous != null) {
+                            .fillMaxWidth()
+                            .padding(start = 24.dp, end = 24.dp, top = 18.dp, bottom = 24.dp)
+                    ) {
                         LightText(
-                            text = previous.label(),
+                            text = "SAVED",
                             variant = LightTextVariant.Button,
-                            modifier = Modifier.lightClickable { viewModel.goTo(previous) },
+                            modifier = Modifier
+                                .lightClickable { openMarks() }
+                                .padding(end = 24.dp),
                         )
-                    }
-                    Column(modifier = Modifier.weight(1f)) {}
-                    if (next != null) {
                         LightText(
-                            text = next.label(),
+                            text = "SETTINGS",
                             variant = LightTextVariant.Button,
-                            modifier = Modifier.lightClickable { viewModel.goTo(next) },
+                            modifier = Modifier.lightClickable { openSettings() },
                         )
                     }
                 }
@@ -542,6 +590,13 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
     }
 
     private companion object {
+
+        /**
+         * How far the page must move before the footer reacts, in pixels.
+         * Without it, the small jitter of a finger resting on the screen
+         * flickers the footer in and out.
+         */
+        const val SCROLL_THRESHOLD = 24
 
         /** A verse laid out for display, with each word's span remembered. */
         data class Rendered(

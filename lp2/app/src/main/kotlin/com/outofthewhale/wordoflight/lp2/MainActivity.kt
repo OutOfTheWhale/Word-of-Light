@@ -9,6 +9,8 @@ import com.outofthewhale.wordoflight.ApiKeyStore
 import com.outofthewhale.wordoflight.BibleApi
 import com.outofthewhale.wordoflight.ChapterCache
 import com.outofthewhale.wordoflight.ChapterRepository
+import com.outofthewhale.wordoflight.Concordance
+import com.outofthewhale.wordoflight.Lexicon
 import com.outofthewhale.wordoflight.MarksStore
 import com.outofthewhale.wordoflight.ModuleStore
 import com.outofthewhale.wordoflight.NltApi
@@ -38,12 +40,16 @@ class MainActivity : ComponentActivity() {
             nltApi = NltApi(keyStore),
         )
 
+        val readAsset: (String) -> ByteArray = { path -> assets.open(path).use { it.readBytes() } }
+
         setContent {
             WordOfLightTheme {
                 WordOfLightApp(
                     repository = repository,
                     marksStore = MarksStore(dataStore),
                     keyStore = keyStore,
+                    lexicon = Lexicon(readAsset),
+                    concordance = Concordance(readAsset),
                 )
             }
         }

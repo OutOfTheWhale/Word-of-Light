@@ -375,7 +375,7 @@ internal fun NoteEditor(
 
 /** Every non-reading screen: a title, a scrolling body, and a way back. */
 @Composable
-private fun Page(title: String, onBack: () -> Unit, body: @Composable () -> Unit) {
+internal fun Page(title: String, onBack: () -> Unit, body: @Composable () -> Unit) {
     val palette = LocalPalette.current
     val type = LocalTypography.current
 

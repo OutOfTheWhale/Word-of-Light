@@ -3,6 +3,7 @@ package com.outofthewhale.wordoflight.lp2
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -26,8 +27,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.outofthewhale.wordoflight.ApiKeyStore
@@ -35,13 +38,18 @@ import com.outofthewhale.wordoflight.Book
 import com.outofthewhale.wordoflight.Canon
 import com.outofthewhale.wordoflight.ChapterRef
 import com.outofthewhale.wordoflight.ChapterRepository
+import com.outofthewhale.wordoflight.Concordance
+import com.outofthewhale.wordoflight.Lexicon
 import com.outofthewhale.wordoflight.Fetched
 import com.outofthewhale.wordoflight.Marks
 import com.outofthewhale.wordoflight.MarksStore
 import com.outofthewhale.wordoflight.Source
 import com.outofthewhale.wordoflight.Translation
 import com.outofthewhale.wordoflight.Translations
+import com.outofthewhale.wordoflight.Testament
 import com.outofthewhale.wordoflight.Verse
+import com.outofthewhale.wordoflight.VerseRef
+import com.outofthewhale.wordoflight.Word
 import kotlinx.coroutines.launch
 
 internal sealed interface Route {
@@ -52,6 +60,8 @@ internal sealed interface Route {
     data class Chapters(val book: Book) : Route
     data class Marks(val list: MarkList) : Route
     data class Note(val anchor: String, val title: String, val initial: String) : Route
+    data class Study(val word: Word, val testament: Testament) : Route
+    data class Compare(val verses: List<VerseRef>) : Route
 }
 
 @Composable
@@ -59,6 +69,8 @@ fun WordOfLightApp(
     repository: ChapterRepository,
     marksStore: MarksStore,
     keyStore: ApiKeyStore,
+    lexicon: Lexicon,
+    concordance: Concordance,
 ) {
     var route by remember { mutableStateOf<Route>(Route.Reader) }
     var ref by remember { mutableStateOf(ChapterRef("gen", 1)) }
@@ -177,10 +189,19 @@ fun WordOfLightApp(
                     if (anchor != null) {
                         route = Route.Note(
                             anchor = anchor,
-                            title = com.outofthewhale.wordoflight.VerseRef.parse(anchor)
-                                ?.label() ?: "Note",
+                            title = VerseRef.parse(anchor)?.label() ?: "Note",
                             initial = marks.noteFor(anchor),
                         )
+                    }
+                },
+                onCompare = {
+                    val chosen = selection.mapNotNull(VerseRef::parse).sortedBy { it.verse }
+                    if (chosen.isNotEmpty()) route = Route.Compare(chosen)
+                },
+                onStudyWord = { word ->
+                    if (word.strong != null) {
+                        val testament = Canon.book(ref.book)?.testament ?: Testament.OLD
+                        route = Route.Study(word, testament)
                     }
                 },
                 onClearSelection = { selection = emptySet() },
@@ -231,6 +252,25 @@ fun WordOfLightApp(
                 onBack = { route = Route.Menu },
             )
 
+            is Route.Study -> WordStudyView(
+                word = current.word,
+                testament = current.testament,
+                lexicon = lexicon,
+                concordance = concordance,
+                onPick = {
+                    ref = it
+                    route = Route.Reader
+                },
+                onBack = { route = Route.Reader },
+            )
+
+            is Route.Compare -> CompareView(
+                verses = current.verses,
+                readable = readable,
+                repository = repository,
+                onBack = { route = Route.Reader },
+            )
+
             is Route.Note -> NoteEditor(
                 title = current.title,
                 initial = current.initial,
@@ -268,6 +308,8 @@ private fun Reader(
     onUnderline: () -> Unit,
     onMark: () -> Unit,
     onNote: () -> Unit,
+    onCompare: () -> Unit,
+    onStudyWord: (Word) -> Unit,
     onClearSelection: () -> Unit,
     onGoTo: (ChapterRef) -> Unit,
 ) {
@@ -317,9 +359,12 @@ private fun Reader(
                     style = type.fine.copy(color = palette.contentSecondary),
                     modifier = Modifier.padding(bottom = 4.dp),
                 )
-                Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                Row(modifier = Modifier.fillMaxWidth()) {
                     Action("UNDERLINE", onUnderline)
+                    Action("COMPARE", onCompare)
                     Action("NOTE", onNote)
+                }
+                Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
                     Action("MARK", onMark)
                     Action("CLEAR", onClearSelection)
                 }
@@ -340,6 +385,7 @@ private fun Reader(
                         bookmarked = marks.forVerse(key)?.bookmarked == true,
                         hasNote = marks.forVerse(key)?.hasNote == true,
                         onTap = { onToggleSelect(key) },
+                        onLongPressWord = onStudyWord,
                     )
                 }
             }
@@ -369,6 +415,7 @@ private fun VerseRow(
     bookmarked: Boolean,
     hasNote: Boolean,
     onTap: () -> Unit,
+    onLongPressWord: (Word) -> Unit,
 ) {
     val palette = LocalPalette.current
     val type = LocalTypography.current
@@ -404,14 +451,40 @@ private fun VerseRow(
             style = type.fine.copy(color = palette.contentSecondary),
             modifier = Modifier.width(34.dp).padding(start = 6.dp),
         )
-        BasicText(
-            text = verse.render(),
-            style = type.paragraph.copy(
-                color = palette.content,
-                textDecoration = if (highlighted) TextDecoration.Underline else null,
-            ),
-            modifier = Modifier.weight(1f).clickable(onClick = onTap),
+        val rendered = remember(verse) { renderVerse(verse) }
+        val style = type.paragraph.copy(
+            color = palette.content,
+            textDecoration = if (highlighted) TextDecoration.Underline else null,
         )
+
+        if (rendered.words.isEmpty()) {
+            // A fetched translation carries no Strong's tagging, so there is
+            // nothing to long-press into. Only the bundled KJV is tagged.
+            BasicText(
+                text = verse.render(),
+                style = style,
+                modifier = Modifier.weight(1f).clickable(onClick = onTap),
+            )
+        } else {
+            var layout by remember(verse) { mutableStateOf<TextLayoutResult?>(null) }
+            // One text block, so the verse still wraps as prose; the tapped
+            // word is found by hit-testing the character offset.
+            BasicText(
+                text = rendered.text,
+                style = style,
+                onTextLayout = { layout = it },
+                modifier = Modifier.weight(1f).pointerInput(rendered) {
+                    detectTapGestures(
+                        onTap = { onTap() },
+                        onLongPress = { position ->
+                            val result = layout ?: return@detectTapGestures
+                            rendered.wordAt(result.getOffsetForPosition(position))
+                                ?.let(onLongPressWord)
+                        },
+                    )
+                },
+            )
+        }
     }
 }
 

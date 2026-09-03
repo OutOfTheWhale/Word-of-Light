@@ -1,52 +1,278 @@
-# light-sdk
-or: a tool for building Tools
+# Word of Light
 
-## tl;dr
-This repository contains the scaffolding for building simple tools for the Light Phone III. Included are a library ([:sdk:client](./sdk/client)) and placeholder application ([:tool](./tool)) that depends on it. To create a tool that is fully compatible with LightOS, you must write your application code within the `tool` module, using the primitives provided by the sdk client library.
+A minimalist Bible reader for the [Light Phone III](https://www.thelightphone.com/), built
+as a Light SDK tool. Black and white, no notifications, no feed — just Scripture, with a
+word study one long-press away.
 
-You can and should use current Android best practices: Kotlin for all source code, Compose for UI, Coroutines for async programming, and MVVM architecture. **Although this is appears to be a fairly standard Android dev environment, you will quickly find out that we are (gently but broadly) restricting which Android APIs and third-party libraries can be used. This is in an effort to provide a secure and distinctly _light_ experience for our users. These restrictions are _not_ set in stone and should ease up over time. If there is a stable, open-source library that you'd like us to allow, please let us know! More on this later.**
+The King James Version ships inside the app: all 66 books, 31,102 verses, tagged with
+Strong's numbers, with the full Hebrew and Greek lexicon and a complete concordance. It
+works with the radio off. No account, no key, no network.
 
-## IMPORTANT!! July 1, 2026 Update
-If you're reading this, welcome! You're early! (in a cool way)
-This repo is a work-in-progress and will remain so for a while. Things are going to change _fast_ in the coming weeks. If you're going to start building right away, be sure to `git pull` frequently.
-Before you do, though, please be aware that **while we feel good about letting everybody start to explore and build, we are still working on the infrastructure to properly deploy your new tools.**
-The currently builds of LightOS in the wild are not yet ready to "play nice" with the tools built here. If you're someone who's already comfortable working with ADB to sideload APKs on your
-Light Phone III, you can totally do that with whatever you do here! But we're shooting to make these tools feel as seamless as the ones already available in LightOS, and that's going to take a bit more work. 
-We're hoping to have an update on that front later this month. In the meantime, the best way to start working is to use an Android emulator running our new [LightOS Emulator](sdk/emulator). The instructions for getting that up and running
-are [right here](docs/system_app).
+| Reading | Word study | Selection |
+|---|---|---|
+| ![Reading Genesis 1](docs/screenshots/reading.png) | ![Strong's word study](docs/screenshots/word-study.png) | ![Selecting a verse](docs/screenshots/selection.png) |
 
-## Quickstart
+| Books | Settings |
+|---|---|
+| ![Book picker](docs/screenshots/books.png) | ![Settings](docs/screenshots/settings.png) |
 
-### Running your Tool
-**You can test your tool on any Android device or emulator**, but certain functionality (receiving push notifications, requesting special permissions) can only be tested with:
-A) Real Light Phone hardware running LightOS
-B) An Android emulator (on your computer) set up to run our LightOS emulator app as a _system app_ ([see advanced instructions](docs/system_app))
+---
 
-You can quickly [create an emulator](https://developer.android.com/studio/run/managing-avds) that generally feels like an LPIII by using the following settings:
-* 1080 X 1240, 3.92" display
-* Android API 34
-* NO Google Play Services installed
+## Features
 
-### Start Building
-1. Fork and/or clone this repository into your local dev environment.
-2. Install Android Studio and open this project within it. (IntelliJ IDEA should also work)
+### Reading
 
-3. Edit the code in `HomeScreen` and `HomeScreenViewModel` to get started. `Homescreen` surfaces a `@Composable` method named `Content`. This is the UI that is shown when the tool first boots. You'll notice this UI sources data from it's `viewModel` field, which is an instance of `HomeScreenViewModel`. Edit that class with your screen's logic and expose the data to the UI using either Compose `State` or Coroutine `Flow`s. If you want to create a new screen, create a new Screen/ViewModel pair: your screen should extend from `LightScreen` and your VM from `LightScreenViewModel`. Your screen implementation will need:
-   1. A direct reference to your ViewModel's class type
-   2. A factory method for creating a new instance of your ViewModel.
+- **The whole KJV offline.** 66 books, 31,102 verses bundled in the app.
+- **Book and chapter picker** — tap the chapter title at the top left.
+- **Chapter navigation that names its destination.** The bottom of Genesis 1 offers
+  "Genesis 2", not "NEXT". At the end of a book it tells you which book comes next.
+- **Turning the page starts at the top** of the new chapter.
+- **Translator-added words in italics** — the words the KJV translators supplied that have
+  no counterpart in the Hebrew or Greek, printed in italics since 1611.
+- **Dark by default**, with a light theme in Settings.
 
-Look at `HomeScreen` as an example for how this is done. To navigate to your new screen, use the `navigateTo` function built into `LightScreen` - just pass it a lambda to create an instance of your new screen. Note that the `LightScreen` constructor takes in a `SealedLightActivity`. The lambda is provided an instance of this as a default parameter.
+### Word study
 
-Since LightOS does not use Android system navigation, we provide a back button for you. As long as you use `navigateTo` to move between screens, our back button should work great. If need be, you can override the `onBackPressed` method in your `LightViewModel`.
+Long-press any word to open it.
 
-### Sharing Your Tool
-**As of July 1, 2026, there's no "easy" way to share your tool with a Light Phone III user. We're working hard on that. This is how we believe it's going to look.**
+- The **Hebrew or Greek** original, its transliteration, and its meaning.
+- The **Strong's number**, definition, root and part of speech.
+- **"Found X verses"** — every other verse in the Bible using that same original word.
+  Tap one to jump there.
+- **Testament-aware.** The Old Testament is Hebrew and Aramaic, the New is Greek. A word
+  tagged with a number from the wrong language shows nothing rather than a wrong answer —
+  a mistaken lexicon entry looks completely authoritative, which is worse than a blank.
 
-Given our relatively limited resources and desire to keep our users safe, we're requiring that all community tools be open source (including our own!). We will be building and signing these tools directly from a publicly available git commit, and we'll be archiving the source at build time. You're free to build and share privately, but LightOS won't let you install tools that are not signed by us without acknowledging privacy and performance risks. We won't block users from performing these "dangerous" sideloads, but we're not going to encourage it either. In the near future, you'll be able to queue up a build of your tool on our servers, and if it follows our guidelines and compiles cleanly, we will hand you back a signed, shareable APK.
+Backed by 326,681 tagged words, a 12,040-entry lexicon (4,760 Greek, 7,280 Hebrew) and a
+concordance of 291,919 verse references. All of it on the device.
 
-Once we release a version of LightOS that supports community tools, users will have an option to choose what kind of tools they want to be able to run on their device:
-- **Light-approved tools**: These include tools that are either built internally by the Light team, or built by the community and officially tested/signed-off by the Light team. We don't know _exactly_ what that sign-off process is going to look like, but as a heads-up: we're going to be looking pretty hard at whether a submitted tool matches the Light ethos both functionally and aesthetically. We've included a UX/UI library to make this as easy as possible! From a technical standpoint, these approved tools are both signed by us _and_ added to an "allow-list" within LightOS. Phones with this option selected will only install and display tools that meet both criteria.
-- **SDK-built tools**: This is a slightly more permissive choice. Phones with this option selected will install and launch any tool that was built and signed by Light. These don't require any manual approval by us (though we can block them in extreme cases). If a user wants to be able to install a tool that was shared locally or somewhere outside of Light's dashboard, but they still want to be confident that it will run well and integrate nicely with LightOS, they might choose this option!
-- **Any tools**: A user will have the option to make any APK launchable from LightOS, but they will own the responsibility of getting them un/installed. When a user selects this option, we will be warning them that they are potentially opening their device up to security risks, and in doing so will limit our ability to support them if something goes wrong.
+### Saving
 
-## [Complete Documentation](./docs)
+- **Tap a verse to select it**, keep tapping to add more, then act on the whole selection.
+- **Highlight**, **bookmark**, and **note** — all stored on the phone and kept across
+  restarts.
+- Because the screen is monochrome, state shows as a bar in the left margin: bright for a
+  highlight, dim for a pending selection. A `*` on the verse number marks a bookmark, a
+  `·` marks a note.
+- **SAVED** lists everything you have kept, in canonical order, grouped into notes,
+  highlights and bookmarks. Tap any entry to jump to it.
+
+Nothing is uploaded anywhere. There is no account and no sync.
+
+---
+
+## Translations
+
+The KJV is built in because it is public domain. Everything else is copyrighted and comes
+from its publisher's own API, using **your** key — the text goes from the publisher to your
+phone, and never through this project.
+
+| Version | Source | Cost |
+|---|---|---|
+| **KJV** | Bundled in the app | Free, offline, no key |
+| **ESV** | Crossway, `api.esv.org` | Free for non-commercial use |
+| **NLT** | Tyndale, `api.nlt.to` | Free for non-commercial use |
+| **CSB, NKJV, AMP** | API.Bible (American Bible Society) | Free Starter tier — pick any 3 |
+
+**Three signups, not five.** Crossway and Tyndale each run their own API for their own
+translation. One API.Bible account covers CSB, NKJV and AMP together, because its free
+Starter tier grants three copyrighted translations.
+
+> **Status:** key storage and Settings are built and working. The fetch layer is not
+> finished yet, so entering a key stores it but does not yet download text. The KJV is
+> fully functional.
+
+---
+
+## Getting your API keys
+
+### API.Bible — unlocks CSB, NKJV and AMP
+
+One key covers all three.
+
+1. Go to **[docs.api.bible](https://docs.api.bible/)** and follow the link to the developer
+   portal. Note that American Bible Society replaced the older `scripture.api.bible` portal
+   during 2026 — older tutorials point at a host that no longer exists.
+2. Create an account.
+3. Create an **application**. You will be asked what you are building.
+4. On the free **Starter** plan you select **three** copyrighted translations. Choose
+   **CSB**, **NKJV** and **AMP**.
+5. Copy the key from your application's page.
+
+Free tier: 5,000 calls per month across all three, non-commercial use.
+
+### ESV — Crossway
+
+The step people miss: **creating an account does not give you a key.** You must create an
+*Application*, and it may wait on manual approval by Crossway staff.
+
+1. Go to **[api.esv.org](https://api.esv.org/)** — this is a different site from
+   `crossway.org`.
+2. Click the avatar → **Sign In**, creating the account there if you need one.
+3. Click **Create an API Application**
+   ([direct link](https://api.esv.org/account/create-application/)).
+4. Describe your application honestly. **This is the step that may need staff approval**,
+   which is why no key appears immediately.
+5. Once approved, the key is issued.
+6. To find it again later: avatar → **My API Applications**.
+
+Free tier: 5,000 requests per day, non-commercial use.
+
+### NLT — Tyndale
+
+1. Go to **[api.nlt.to](https://api.nlt.to/)**.
+2. Register for a key.
+
+Free for non-commercial use.
+
+---
+
+## Entering a key in the app
+
+1. Scroll to the bottom of any chapter.
+2. Tap **SETTINGS**.
+3. Tap the provider you have a key for — **Crossway**, **Tyndale** or **API.Bible**. Each
+   row lists which translations it unlocks and where to get the key.
+4. Type the key on the Light Phone keyboard and tap **SAVE**.
+5. The row changes to **KEY SAVED**. Tap **REMOVE** to delete it.
+
+Once a key is stored, switch translations by tapping the version abbreviation at the top
+right of the reader.
+
+### How your keys are stored
+
+- Keys are **typed on the device**. Nothing is compiled into the app.
+- They are encrypted with **AES-256/GCM** under a key held in the **Android Keystore**,
+  which is hardware-backed and cannot be exported from the phone.
+- **A saved key is never displayed back.** Settings shows only whether one is present, and
+  editing always opens an empty field, so a key can be replaced but not read off the
+  screen.
+- Keys never leave the device except as a header on a request to that provider.
+
+Because the Keystore key is bound to the device, your API keys **will not survive a
+reinstall or a restore onto a different phone**. Settings will simply show "NO KEY" again
+and you retype it. That is the correct trade for a credential, not a fault.
+
+---
+
+## Building
+
+Requires the Android SDK and a JDK.
+
+```bash
+./gradlew :tool:assembleDebug
+```
+
+On Windows with Android Studio's bundled JDK:
+
+```bash
+JAVA_HOME="F:\Android Studio\jbr" ./gradlew.bat :tool:assembleDebug
+```
+
+Install to the LightPhone3 emulator:
+
+```bash
+adb -s emulator-5554 install -r tool/build/outputs/apk/debug/tool-debug.apk
+```
+
+Launch it:
+
+```bash
+adb -s emulator-5554 shell monkey -p com.outofthewhale.wordoflight -c android.intent.category.LAUNCHER 1
+```
+
+Run the tests:
+
+```bash
+./gradlew :tool:testDebugUnitTest
+```
+
+> **Note on sideloading:** Light SDK tools do not yet appear in the LightOS launcher on
+> real Light Phone III hardware. This is an upstream gap, not a bug in this app — Light's
+> own SDK README says shipping LightOS builds are not yet ready for tools built this way,
+> and ADB sideloading is the interim path. Launch on-device with the `monkey` command
+> above until Light ships launcher support.
+
+---
+
+## Project layout
+
+```
+tool/src/main/kotlin/com/outofthewhale/wordoflight/
+  Canon.kt              66 books, chapter counts, testaments
+  Models.kt             verses, modules, translations
+  ModuleStore.kt        loads books from device storage, then bundled assets
+  Tagging.kt            parses inline Strong's markers and italics
+  Lexicon.kt            Strong's dictionary lookup
+  Concordance.kt        Strong's number to verse references
+  Marks.kt              highlights, bookmarks and notes
+  KeyCipher.kt          AES-256/GCM key encryption
+  ApiKeyStore.kt        encrypted API key storage
+  ReaderScreen.kt       the reader
+  WordStudyScreen.kt    original language and occurrences
+  BookSelectScreen.kt   book picker
+  ChapterSelectScreen.kt
+  VersionSelectScreen.kt
+  MarksScreen.kt        saved highlights, bookmarks and notes
+  SettingsScreen.kt     API keys and theme
+  NoteEditScreen.kt     text entry
+
+tool/src/main/assets/
+  bible/kjv/            66 books, tagged  (9.0 MB)
+  lexicon/              Strong's, bucketed (4.7 MB)
+  concordance/          reverse index      (3.6 MB)
+
+tools/import/
+  fetch_kjv_tagged.py   downloads and converts the tagged KJV and lexicon
+  build_concordance.py  builds the reverse index from the imported text
+  bible_import.py       converts pasted chapter text into modules
+  test_bible_import.py
+```
+
+### Regenerating the bundled data
+
+The assets are committed so the app builds offline, but they are reproducible:
+
+```bash
+cd tools/import
+python fetch_kjv_tagged.py --assets ../../tool/src/main/assets
+python build_concordance.py --assets ../../tool/src/main/assets
+```
+
+Both scripts validate what they produce — verse totals against the KJV's known 31,102,
+per-book chapter and verse contiguity, and that no Old Testament word carries a Greek tag
+or vice versa.
+
+---
+
+## Attribution
+
+- **King James Version** (1611) — public domain.
+- **Strong's Exhaustive Concordance** (James Strong, 1890) — public domain. Lexicon data
+  derived from the [Open Scriptures](https://github.com/openscriptures/strongs) edition.
+- Tagged KJV text from [kaiserlik/kjv](https://github.com/kaiserlik/kjv).
+- Built on the [Light SDK](https://github.com/lightphone/light-sdk).
+
+No copyrighted translation is included in this repository or in the built app. ESV, NLT,
+CSB, NKJV and AMP are retrieved at runtime from their publishers using the reader's own API
+key, under whatever terms that reader agreed to when they signed up.
+
+---
+
+## Status
+
+Working and verified on the LightPhone3 emulator:
+
+- Reading, book and chapter navigation, version picker
+- Strong's word study and concordance lookup
+- Highlights, bookmarks and notes, persisted across restarts
+- Settings and encrypted API key storage
+
+Not built yet:
+
+- Fetching text from the publisher APIs (keys are stored but unused)
+- Verse comparison across translations
+- Full-text search
+- Resume where you left off
+- Audio Bible
+- Chapter-level notes (supported in the data model, no screen yet)

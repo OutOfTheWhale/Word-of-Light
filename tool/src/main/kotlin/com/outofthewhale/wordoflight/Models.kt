@@ -10,6 +10,18 @@ data class ChapterRef(
     val chapter: Int,
 ) {
     fun label(): String = "${Canon.book(book)?.name ?: book} $chapter"
+
+    /** The stored form, `"gen.1"`. */
+    fun key(): String = "$book.$chapter"
+
+    companion object {
+        fun parse(raw: String): ChapterRef? {
+            val parts = raw.split('.')
+            if (parts.size != 2) return null
+            val chapter = parts[1].toIntOrNull() ?: return null
+            return ChapterRef(parts[0], chapter)
+        }
+    }
 }
 
 /**

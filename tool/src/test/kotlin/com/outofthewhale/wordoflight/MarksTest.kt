@@ -146,6 +146,85 @@ class MarksTest {
         assertEquals("", marks.withChapterNote(ref, "").chapterNote(ref))
     }
 
+    // --- chapter bookmarks ----------------------------------------------
+
+    @Test
+    fun `a chapter bookmark toggles`() {
+        val ref = ChapterRef("gen", 1)
+        val on = Marks().toggleChapterBookmark(ref)
+        assertTrue(on.isChapterBookmarked(ref))
+        assertFalse(on.toggleChapterBookmark(ref).isChapterBookmarked(ref))
+    }
+
+    @Test
+    fun `a chapter bookmark is separate from a verse bookmark`() {
+        // Flagging a chapter should not make its verses look bookmarked.
+        val marks = Marks().toggleChapterBookmark(ChapterRef("gen", 1))
+        assertTrue(marks.bookmarks.isEmpty())
+        assertTrue(marks.isChapterBookmarked(ChapterRef("gen", 1)))
+    }
+
+    @Test
+    fun `bookmarked chapters sort in canonical order`() {
+        val marks = Marks()
+            .toggleChapterBookmark(ChapterRef("exo", 1))
+            .toggleChapterBookmark(ChapterRef("gen", 2))
+            .toggleChapterBookmark(ChapterRef("gen", 10))
+        assertEquals(
+            listOf("gen.2", "gen.10", "exo.1"),
+            marks.bookmarkedChapters.map { it.key() },
+        )
+    }
+
+    // --- reading history -------------------------------------------------
+
+    @Test
+    fun `the last chapter opened is where reading resumes`() {
+        val marks = Marks()
+            .withVisit(ChapterRef("gen", 1), "kjv", 1)
+            .withVisit(ChapterRef("jhn", 3), "csb", 2)
+        val resume = marks.lastRead
+        assertEquals("jhn.3", resume?.ref)
+        assertEquals("csb", resume?.translation)
+    }
+
+    @Test
+    fun `nothing read yet means nowhere to resume`() {
+        assertNull(Marks().lastRead)
+    }
+
+    @Test
+    fun `reopening a chapter moves it up rather than repeating it`() {
+        // The history is of places, not of taps.
+        val marks = Marks()
+            .withVisit(ChapterRef("gen", 1), "kjv", 1)
+            .withVisit(ChapterRef("jhn", 3), "kjv", 2)
+            .withVisit(ChapterRef("gen", 1), "kjv", 3)
+        assertEquals(listOf("gen.1", "jhn.3"), marks.recents.map { it.ref })
+    }
+
+    @Test
+    fun `the history is capped`() {
+        val marks = (1..60).fold(Marks()) { acc, chapter ->
+            acc.withVisit(ChapterRef("psa", chapter), "kjv", chapter.toLong())
+        }
+        assertTrue(marks.recents.size <= 40, "was ${marks.recents.size}")
+        assertEquals("psa.60", marks.recents.first().ref)
+    }
+
+    @Test
+    fun `a chapter reference round-trips through its stored form`() {
+        val ref = ChapterRef("1sa", 17)
+        assertEquals(ref, ChapterRef.parse(ref.key()))
+    }
+
+    @Test
+    fun `a malformed chapter reference parses to nothing`() {
+        assertNull(ChapterRef.parse("gen"))
+        assertNull(ChapterRef.parse("gen.x"))
+        assertNull(ChapterRef.parse(""))
+    }
+
     @Test
     fun `an unparseable reference sorts last instead of crashing`() {
         val marks = Marks().withHighlight(listOf("nonsense", genesis), true)

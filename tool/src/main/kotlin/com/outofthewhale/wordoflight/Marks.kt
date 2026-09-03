@@ -41,10 +41,30 @@ data class VerseMark(
  * of records, not millions - so it is stored as a single JSON value rather than
  * a database, and every change is a pure transformation of this object.
  */
+/**
+ * A chapter the reader has opened.
+ *
+ * This is how "pick up where you left off" works: every chapter opened is
+ * recorded with the translation it was read in, most recent first, and the
+ * newest entry is the resume point. Keeping a list rather than a single
+ * position also answers "what was I reading last week", which one value cannot.
+ */
+@Serializable
+data class Recent(
+    val ref: String,
+    val translation: String = "kjv",
+    val at: Long = 0L,
+) {
+    fun chapterRef(): ChapterRef? = ChapterRef.parse(ref)
+}
+
 @Serializable
 data class Marks(
     val verses: Map<String, VerseMark> = emptyMap(),
     val chapterNotes: Map<String, String> = emptyMap(),
+    /** Whole chapters flagged, as distinct from single verses. */
+    val chapterBookmarks: Set<String> = emptySet(),
+    val recents: List<Recent> = emptyList(),
 ) {
     fun forVerse(ref: String): VerseMark? = verses[ref]
 
@@ -103,6 +123,61 @@ data class Marks(
 
     /** Removes every mark on a verse in one go. */
     fun clear(ref: String): Marks = copy(verses = verses - ref)
+
+    // --- chapters -------------------------------------------------------
+
+    fun isChapterBookmarked(ref: ChapterRef): Boolean = ref.key() in chapterBookmarks
+
+    fun toggleChapterBookmark(ref: ChapterRef): Marks {
+        val key = ref.key()
+        return copy(
+            chapterBookmarks = if (key in chapterBookmarks) {
+                chapterBookmarks - key
+            } else {
+                chapterBookmarks + key
+            }
+        )
+    }
+
+    /** Bookmarked chapters in canonical order. */
+    val bookmarkedChapters: List<ChapterRef>
+        get() = chapterBookmarks.mapNotNull(ChapterRef::parse)
+            .sortedBy { it.canonicalOrder() }
+
+    val annotatedChapters: List<ChapterRef>
+        get() = chapterNotes.keys.mapNotNull(ChapterRef::parse)
+            .sortedBy { it.canonicalOrder() }
+
+    // --- reading history ------------------------------------------------
+
+    /**
+     * Records a chapter as read.
+     *
+     * The same chapter reopened moves to the front rather than appearing
+     * twice, so the list stays a history of *places* rather than of taps. It
+     * is capped, because this is for finding your way back, not for keeping a
+     * permanent record.
+     */
+    fun withVisit(ref: ChapterRef, translation: String, now: Long): Marks {
+        val key = ref.key()
+        val entry = Recent(key, translation, now)
+        val kept = recents.filterNot { it.ref == key }
+        return copy(recents = (listOf(entry) + kept).take(RECENTS_LIMIT))
+    }
+
+    /** Where to resume: the last chapter opened, with the translation used. */
+    val lastRead: Recent? get() = recents.firstOrNull()
+}
+
+// At file level, not in a companion: @Serializable puts serializer() on the
+// companion, so declaring a private one hides it from MarksStore.
+private const val RECENTS_LIMIT = 40
+
+/** Sorts a chapter into canonical order rather than alphabetical. */
+private fun ChapterRef.canonicalOrder(): Long {
+    val index = Canon.books.indexOfFirst { it.id == book }
+    if (index < 0) return Long.MAX_VALUE
+    return index * 1_000L + chapter
 }
 
 /** Sorts "gen.1.1" into canonical order rather than alphabetical. */
@@ -112,8 +187,6 @@ private fun String.canonicalOrder(): Long {
     if (book < 0) return Long.MAX_VALUE
     return book * 1_000_000L + parsed.chapter * 1_000L + parsed.verse
 }
-
-fun ChapterRef.key(): String = "$book.$chapter"
 
 fun VerseRef.key(): String = "$book.$chapter.$verse"
 

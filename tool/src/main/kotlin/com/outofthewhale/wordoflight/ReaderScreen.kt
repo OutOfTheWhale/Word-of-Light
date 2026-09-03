@@ -21,7 +21,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.AnnotatedString
@@ -36,6 +35,8 @@ import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
+import com.thelightphone.sdk.ui.LightIcon
+import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
@@ -83,9 +84,18 @@ class ReaderViewModel(
     private val _blocked = MutableStateFlow<Map<String, String?>>(emptyMap())
     val blocked: StateFlow<Map<String, String?>> = _blocked
 
+    /** Guards the one-time restore; later mark changes must not move the reader. */
+    private var restored = false
+
     init {
         viewModelScope.launch {
-            marksStore.marks.collect { _marks.value = it }
+            marksStore.marks.collect { marks ->
+                _marks.value = marks
+                if (!restored) {
+                    restored = true
+                    resume(marks)
+                }
+            }
         }
         viewModelScope.launch {
             // An API translation is readable once its provider has a key *and*
@@ -107,6 +117,8 @@ class ReaderViewModel(
     private fun reload() {
         val translation = _translation.value
         val ref = _ref.value
+
+        recordVisit()
 
         // Already on the device: bundled, sideloaded, or fetched once before.
         repository.local(translation, ref)?.let { verses ->
@@ -145,6 +157,20 @@ class ReaderViewModel(
         }
     }
 
+    /**
+     * Picks up where reading left off.
+     *
+     * Restores the translation as well as the place - returning to the right
+     * chapter in the wrong version is only half of remembering.
+     */
+    private fun resume(marks: Marks) {
+        val last = marks.lastRead ?: return
+        val ref = last.chapterRef() ?: return
+        _ref.value = ref
+        Translations.byId(last.translation)?.let { _translation.value = it }
+        reload()
+    }
+
     fun goTo(ref: ChapterRef) {
         _ref.value = ref
         clearSelection()
@@ -154,6 +180,28 @@ class ReaderViewModel(
     fun switchTo(translation: Translation) {
         _translation.value = translation
         reload()
+    }
+
+    /**
+     * Every chapter displayed becomes both the history and the resume point.
+     *
+     * Called from [reload] rather than only from navigation, so that simply
+     * opening the app and reading counts - otherwise the history records where
+     * you jumped to and not where you actually were. Returning from a menu
+     * re-displays the same chapter, so an entry already at the front is left
+     * alone rather than rewritten.
+     */
+    private fun recordVisit() {
+        val ref = _ref.value
+        val translation = _translation.value.id
+        val front = _marks.value.lastRead
+        if (front?.ref == ref.key() && front.translation == translation) return
+        edit { it.withVisit(ref, translation, System.currentTimeMillis()) }
+    }
+
+    fun toggleChapterBookmark() {
+        val ref = _ref.value
+        edit { it.toggleChapterBookmark(ref) }
     }
 
     fun testament(): Testament =
@@ -253,37 +301,10 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
         val themeColors by LightThemeController.colors.collectAsState()
 
         val scrollState = rememberScrollState()
-        var footerVisible by remember { mutableStateOf(true) }
 
         // Turning the page should land at the top of the new chapter, not
         // halfway down it because that is where the last one was left.
-        LaunchedEffect(ref) {
-            scrollState.scrollTo(0)
-            footerVisible = true
-        }
-
-        // The footer gets out of the way while reading forward and comes back
-        // on the way up. It also stays put at either end, where there is no
-        // reading direction to infer and hiding it would just look broken.
-        LaunchedEffect(scrollState) {
-            var anchor = scrollState.value
-            snapshotFlow { scrollState.value }.collect { position ->
-                when {
-                    position <= 0 || position >= scrollState.maxValue -> {
-                        footerVisible = true
-                        anchor = position
-                    }
-                    position - anchor > SCROLL_THRESHOLD -> {
-                        footerVisible = false
-                        anchor = position
-                    }
-                    anchor - position > SCROLL_THRESHOLD -> {
-                        footerVisible = true
-                        anchor = position
-                    }
-                }
-            }
-        }
+        LaunchedEffect(ref) { scrollState.scrollTo(0) }
 
         LightTheme(colors = themeColors) {
             Column(
@@ -297,14 +318,31 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 24.dp, end = 24.dp, top = 16.dp, bottom = 6.dp)
+                        .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 6.dp)
                 ) {
+                    LightIcon(
+                        icon = LightIcons.LIST,
+                        modifier = Modifier
+                            .lightClickable { openMenu() }
+                            .padding(end = 12.dp),
+                    )
                     LightText(
                         text = ref.label(),
                         variant = LightTextVariant.Subheading,
                         modifier = Modifier
                             .weight(1f)
                             .lightClickable { openBooks() },
+                    )
+                    // The chapter flag. Bright means flagged, dim means not,
+                    // matching the "*" already used on a bookmarked verse -
+                    // one mark, two scales.
+                    LightText(
+                        text = "*",
+                        variant = LightTextVariant.Subheading,
+                        lighten = !marks.isChapterBookmarked(ref),
+                        modifier = Modifier
+                            .lightClickable { viewModel.toggleChapterBookmark() }
+                            .padding(horizontal = 10.dp),
                     )
                     LightText(
                         text = translation.abbreviation,
@@ -368,31 +406,6 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
                     }
                 }
 
-                if (footerVisible) {
-                    // Enough top padding that text cut mid-line at the edge of
-                    // the scroll region does not read as sitting under the bar.
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 14.dp)
-                    ) {
-                        val previous = Canon.previous(ref)
-                        val next = Canon.next(ref)
-
-                        if (previous != null) {
-                            FooterAction("‹ ${step(previous, ref)}") {
-                                viewModel.goTo(previous)
-                            }
-                        }
-                        Column(modifier = Modifier.weight(1f)) {}
-                        FooterAction("SAVED") { openMarks() }
-                        FooterAction("SETTINGS") { openSettings() }
-                        Column(modifier = Modifier.weight(1f)) {}
-                        if (next != null) {
-                            FooterAction("${step(next, ref)} ›") { viewModel.goTo(next) }
-                        }
-                    }
-                }
             }
         }
     }
@@ -421,16 +434,6 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
         }
     }
 
-    @Composable
-    private fun FooterAction(label: String, onClick: () -> Unit) {
-        LightText(
-            text = label,
-            variant = LightTextVariant.Fine,
-            modifier = Modifier
-                .lightClickable(onClick = onClick)
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-        )
-    }
 
     @Composable
     private fun Action(label: String, onClick: () -> Unit) {
@@ -456,14 +459,11 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
         }
     }
 
-    private fun openSettings() {
-        navigateTo({ activity -> SettingsScreen(activity, keyStore) })
-    }
 
-    private fun openMarks() {
-        navigateTo({ activity -> MarksScreen(activity, viewModel.marks) }) { destination ->
-            viewModel.goTo(destination)
-        }
+    private fun openMenu() {
+        navigateTo({ activity ->
+            MenuScreen(activity, viewModel.marks, keyStore)
+        }) { destination -> viewModel.goTo(destination) }
     }
 
     private fun openCompare() {
@@ -604,12 +604,6 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
 
     private companion object {
 
-        /**
-         * How far the page must move before the footer reacts, in pixels.
-         * Without it, the small jitter of a finger resting on the screen
-         * flickers the footer in and out.
-         */
-        const val SCROLL_THRESHOLD = 24
 
         /**
          * A compact label for the footer's chapter step.

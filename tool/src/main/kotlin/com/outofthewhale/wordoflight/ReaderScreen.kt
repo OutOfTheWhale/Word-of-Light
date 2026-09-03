@@ -292,22 +292,23 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
                     .background(LightThemeTokens.colors.background)
             ) {
                 // Pinned. Changing book, chapter or version should never mean
-                // scrolling somewhere first to find the control.
+                // scrolling somewhere first to find the control. Kept low so
+                // the bar costs as little reading space as possible.
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 24.dp, end = 24.dp, top = 28.dp, bottom = 12.dp)
+                        .padding(start = 24.dp, end = 24.dp, top = 16.dp, bottom = 6.dp)
                 ) {
                     LightText(
                         text = ref.label(),
-                        variant = LightTextVariant.Heading,
+                        variant = LightTextVariant.Subheading,
                         modifier = Modifier
                             .weight(1f)
                             .lightClickable { openBooks() },
                     )
                     LightText(
                         text = translation.abbreviation,
-                        variant = LightTextVariant.Detail,
+                        variant = LightTextVariant.Fine,
                         lighten = true,
                         modifier = Modifier.lightClickable { openVersions(translation) },
                     )
@@ -368,27 +369,28 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
                 }
 
                 if (footerVisible) {
-                    // Generous top padding: text scrolling to the edge of the
-                    // region is cut mid-line, and without a gap the footer
-                    // reads as sitting on top of the words rather than below
-                    // them.
+                    // Enough top padding that text cut mid-line at the edge of
+                    // the scroll region does not read as sitting under the bar.
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = 24.dp, end = 24.dp, top = 18.dp, bottom = 24.dp)
+                            .padding(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 14.dp)
                     ) {
-                        LightText(
-                            text = "SAVED",
-                            variant = LightTextVariant.Button,
-                            modifier = Modifier
-                                .lightClickable { openMarks() }
-                                .padding(end = 24.dp),
-                        )
-                        LightText(
-                            text = "SETTINGS",
-                            variant = LightTextVariant.Button,
-                            modifier = Modifier.lightClickable { openSettings() },
-                        )
+                        val previous = Canon.previous(ref)
+                        val next = Canon.next(ref)
+
+                        if (previous != null) {
+                            FooterAction("‹ ${step(previous, ref)}") {
+                                viewModel.goTo(previous)
+                            }
+                        }
+                        Column(modifier = Modifier.weight(1f)) {}
+                        FooterAction("SAVED") { openMarks() }
+                        FooterAction("SETTINGS") { openSettings() }
+                        Column(modifier = Modifier.weight(1f)) {}
+                        if (next != null) {
+                            FooterAction("${step(next, ref)} ›") { viewModel.goTo(next) }
+                        }
                     }
                 }
             }
@@ -417,6 +419,17 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
                 Action("CLEAR") { viewModel.clearSelection() }
             }
         }
+    }
+
+    @Composable
+    private fun FooterAction(label: String, onClick: () -> Unit) {
+        LightText(
+            text = label,
+            variant = LightTextVariant.Fine,
+            modifier = Modifier
+                .lightClickable(onClick = onClick)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+        )
     }
 
     @Composable
@@ -597,6 +610,21 @@ class ReaderScreen(sealedActivity: SealedLightActivity) :
          * flickers the footer in and out.
          */
         const val SCROLL_THRESHOLD = 24
+
+        /**
+         * A compact label for the footer's chapter step.
+         *
+         * Within a book the number alone is unambiguous, since the book is
+         * named in the header directly above. Crossing into another book is
+         * the case worth spelling out, and the only one where a bare number
+         * would mislead.
+         */
+        fun step(target: ChapterRef, current: ChapterRef): String =
+            if (target.book == current.book) {
+                target.chapter.toString()
+            } else {
+                target.label()
+            }
 
         /** A verse laid out for display, with each word's span remembered. */
         data class Rendered(

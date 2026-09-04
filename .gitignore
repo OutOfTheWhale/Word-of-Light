@@ -59,3 +59,6 @@ lp2/.gradle
 lp2/build/
 lp2/app/build/
 lp2/local.properties
+
+# Built APKs staged for a release upload.
+dist/

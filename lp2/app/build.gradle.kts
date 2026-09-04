@@ -63,8 +63,8 @@ android {
         // shared here needs: DataStore wants 21, Keystore AES/GCM wants 23.
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
     }
 
     signingConfigs {

@@ -18,7 +18,7 @@ works with the radio off. No account, no key, no network.
 
 | Books | Writing a note | Settings |
 |---|---|---|
-| ![The book picker, Old Testament first](docs/screenshots/books.png) | ![The note editor, headed with the verse range it will be saved against](docs/screenshots/note.png) | ![Settings, showing which publishers have a key saved](docs/screenshots/settings.png) |
+| ![The book picker, Old Testament first](docs/screenshots/books.png) | ![The note editor, laid out like the LightOS messaging screen, headed with the verse range it will be saved against](docs/screenshots/note.png) | ![Settings, showing which publishers have a key saved](docs/screenshots/settings.png) |
 
 ---
 

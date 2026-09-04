@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
@@ -354,12 +355,18 @@ internal fun NoteEditor(
     var text by remember { mutableStateOf(initial) }
 
     Page(title = title, onBack = onBack) {
+        // A writing area rather than a line: the LP3 build lays this out like
+        // the LightOS messaging screen, and a note of more than a few words
+        // needs to stay readable while it is being written.
         BasicTextField(
             value = text,
             onValueChange = { text = it },
             textStyle = type.paragraph.copy(color = palette.content),
             cursorBrush = SolidColor(palette.content),
-            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 220.dp)
+                .padding(vertical = 8.dp),
         )
         Box(
             modifier = Modifier

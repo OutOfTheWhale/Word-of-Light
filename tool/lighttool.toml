@@ -1,8 +1,8 @@
 [tool]
 id = "com.outofthewhale.wordoflight"
 label = "Word of Light"
-versionCode = 2
-versionName = "1.1.0"
+versionCode = 3
+versionName = "1.2.0"
 # INTERNET is here for the API-backed translations (ESV, NLT, CSB). The
 # bundled KJV needs no network at all.
 permissions = ["android.permission.INTERNET"]

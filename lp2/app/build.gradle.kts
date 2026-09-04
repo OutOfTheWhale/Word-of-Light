@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -36,6 +38,20 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach 
     dependsOn(syncSharedCore)
 }
 
+// Private release keystore. It lives outside the repository - local/ is
+// gitignored - so a fresh clone still builds, falling back to the shared key
+// below. A fallback build is fine for local work and must never be shipped:
+// anyone holding the shared key can forge an update to it.
+val releaseKeystoreFile = rootProject.file("../local/keystore.properties")
+val releaseKeystore: Properties? =
+    if (releaseKeystoreFile.exists()) {
+        Properties().apply {
+            releaseKeystoreFile.inputStream().use { load(it) }
+        }
+    } else {
+        null
+    }
+
 android {
     namespace = "com.outofthewhale.wordoflight.lp2"
     compileSdk = 36
@@ -51,16 +67,31 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = releaseKeystoreFile.parentFile
+                    .resolve(releaseKeystore.getProperty("storeFile"))
+                storePassword = releaseKeystore.getProperty("storePassword")
+                keyAlias = releaseKeystore.getProperty("keyAlias")
+                keyPassword = releaseKeystore.getProperty("keyPassword")
+                enableV3Signing = true
+                enableV4Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
-            // Signed with the debug key so the release build is installable by
-            // sideloading. This is not a distribution key - anyone can produce
-            // an "update" signed the same way. Generate a private keystore,
-            // kept out of the repository, before giving this to anyone else.
-            signingConfig = signingConfigs.getByName("debug")
+            // Signed with the private release keystore when it is present.
+            // The debug-key fallback keeps a fresh clone building; it is not
+            // a distribution key, since anyone can produce an "update"
+            // signed the same way.
+            signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
         }
     }
 

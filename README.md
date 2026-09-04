@@ -149,9 +149,18 @@ right of the reader.
   screen.
 - Keys never leave the device except as a header on a request to that provider.
 
-Because the Keystore key is bound to the device, your API keys **will not survive a
-reinstall or a restore onto a different phone**. Settings will simply show "NO KEY" again
-and you retype it. That is the correct trade for a credential, not a fault.
+Installing a **newer APK over an older one keeps everything** - keys, notes, highlights,
+bookmarks and recents. Android replaces the code and leaves the app's data directory
+alone, so long as the package name and the signing key both stay the same.
+
+What does lose your keys is an actual **uninstall**, "Clear data", a factory reset, or a
+restore onto a different phone - the Keystore key is bound to the device and cannot
+travel with a backup. Settings will show "NO KEY" again and you retype it. That is the
+correct trade for a credential, not a fault.
+
+> **Changing the signing key counts as an uninstall.** Android refuses an update signed
+> with a different key, so switching keystores means uninstalling first and losing notes
+> and keys with it. Settle on a keystore before you write anything you would miss.
 
 ---
 
@@ -186,6 +195,29 @@ Run the tests:
 ```bash
 ./gradlew :tool:testDebugUnitTest
 ```
+
+### Signing
+
+Release builds look for `local/keystore.properties`, which is outside version control:
+
+```properties
+storeFile=wordoflight-release.jks
+storePassword=...
+keyAlias=wordoflight
+keyPassword=...
+```
+
+Create one with:
+
+```bash
+keytool -genkeypair -keystore local/wordoflight-release.jks -alias wordoflight   -keyalg RSA -keysize 4096 -validity 10000
+```
+
+Without that file the build still works, falling back to the Light SDK's shared dev key
+(LP3) or the Android debug key (LP2). Those builds are fine for your own phone and must
+never be handed to anyone else: both keys are public, so anyone can forge an "update" to
+an app signed with them. **Back the keystore and its password up.** Lose either and you
+can never update an already-installed copy again.
 
 > **Note on sideloading:** Light SDK tools do not yet appear in the LightOS launcher on
 > real Light Phone III hardware. This is an upstream gap, not a bug in this app — Light's

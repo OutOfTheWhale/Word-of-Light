@@ -8,13 +8,17 @@ The King James Version ships inside the app: all 66 books, 31,102 verses, tagged
 Strong's numbers, with the full Hebrew and Greek lexicon and a complete concordance. It
 works with the radio off. No account, no key, no network.
 
-| Reading | Word study | Selection |
+| Reading | Selecting verses | Word study |
 |---|---|---|
-| ![Reading Genesis 1](docs/screenshots/reading.png) | ![Strong's word study](docs/screenshots/word-study.png) | ![Selecting a verse](docs/screenshots/selection.png) |
+| ![Genesis 1, two verses underlined and annotated, the chapter flagged](docs/screenshots/reading.png) | ![Two verses selected, showing the underline, compare, note, mark and clear actions](docs/screenshots/selection.png) | ![Strong's entry for H7225, with the Hebrew, its transliteration and the lexicon gloss](docs/screenshots/word-study.png) |
 
-| Books | Settings |
-|---|---|
-| ![Book picker](docs/screenshots/books.png) | ![Settings](docs/screenshots/settings.png) |
+| Menu | Comparing translations | Notes |
+|---|---|---|
+| ![The menu, with live counts beside recents, bookmarks, notes and highlights](docs/screenshots/menu.png) | ![Genesis 1:1 in the KJV, NLT, CSB and NKJV at once](docs/screenshots/compare.png) | ![One note listed against the whole passage it was written on](docs/screenshots/notes.png) |
+
+| Books | Writing a note | Settings |
+|---|---|---|
+| ![The book picker, Old Testament first](docs/screenshots/books.png) | ![The note editor, headed with the verse range it will be saved against](docs/screenshots/note.png) | ![Settings, showing which publishers have a key saved](docs/screenshots/settings.png) |
 
 ---
 
@@ -23,7 +27,11 @@ works with the radio off. No account, no key, no network.
 ### Reading
 
 - **The whole KJV offline.** 66 books, 31,102 verses bundled in the app.
-- **Book and chapter picker** — tap the chapter title at the top left.
+- **Book and chapter picker** — tap the chapter title in the header.
+- **Everything that is not reading lives behind one icon** — the menu, top left of the
+  header, holds books, recents, bookmarks, notes, highlights and settings, which is what
+  lets the reader itself carry nothing but the text.
+- **It reopens where you left off**, in the translation you were reading.
 - **Chapter navigation that names its destination.** The bottom of Genesis 1 offers
   "Genesis 2", not "NEXT". At the end of a book it tells you which book comes next.
 - **Turning the page starts at the top** of the new chapter.
@@ -49,13 +57,17 @@ concordance of 291,919 verse references. All of it on the device.
 ### Saving
 
 - **Tap a verse to select it**, keep tapping to add more, then act on the whole selection.
-- **Highlight**, **bookmark**, and **note** — all stored on the phone and kept across
-  restarts.
-- Because the screen is monochrome, state shows as a bar in the left margin: bright for a
-  highlight, dim for a pending selection. A `*` on the verse number marks a bookmark, a
-  `·` marks a note.
-- **SAVED** lists everything you have kept, in canonical order, grouped into notes,
-  highlights and bookmarks. Tap any entry to jump to it.
+- **UNDERLINE**, **MARK** and **NOTE** apply to every verse you selected. One note written
+  across a passage is one note, listed once as `Genesis 1:1-2`, not the same sentence
+  repeated against each verse.
+- **Underlining and marking leave the selection in place**, so a passage can be underlined
+  and then annotated without picking the same verses out twice. NOTE and CLEAR end it.
+- **Flag the whole chapter** from the ribbon in the header.
+- Because the screen is monochrome, state is shown in the text rather than in colour: a
+  highlight is a real underline, a pending selection is a bar in the left margin, and on
+  the verse number a `*` marks a bookmark and a `·` marks a note.
+- **The menu lists everything you have kept** — recents, bookmarks, notes and highlights,
+  each with a live count. Tap any entry to jump to it.
 
 Nothing is uploaded anywhere. There is no account and no sync.
 
